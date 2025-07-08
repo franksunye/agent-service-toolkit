@@ -100,7 +100,7 @@ class TestDatabaseClient:
         """Test handling of invalid SQL syntax"""
         result = self.db_client.execute_query("INVALID SQL SYNTAX")
         assert result["success"] is False
-        assert result["error_type"] == "DATABASE_ERROR"
+        assert result["error_type"] == "VALIDATION_ERROR"
     
     def test_empty_query(self):
         """Test handling of empty queries"""

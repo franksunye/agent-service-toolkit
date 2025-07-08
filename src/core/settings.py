@@ -229,3 +229,33 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Configure logging
+import logging
+import sys
+
+def configure_logging():
+    """Configure logging for the application"""
+    log_level = logging.DEBUG if settings.is_dev() else logging.INFO
+
+    # Configure root logger
+    logging.basicConfig(
+        level=log_level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+        ]
+    )
+
+    # Set specific logger levels
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+    # Enable debug logging for our modules
+    logging.getLogger("core.database").setLevel(log_level)
+    logging.getLogger("core.deepseek_client").setLevel(log_level)
+    logging.getLogger("agents.sql_agent").setLevel(log_level)
+
+# Initialize logging
+configure_logging()

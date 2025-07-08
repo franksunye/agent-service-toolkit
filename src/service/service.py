@@ -14,7 +14,7 @@ from langchain_core._api import LangChainBetaWarning
 from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langfuse import Langfuse  # type: ignore[import-untyped]
-from langfuse.callback import CallbackHandler  # type: ignore[import-untyped]
+# from langfuse.callback import CallbackHandler  # type: ignore[import-untyped]
 from langgraph.pregel import Pregel
 from langgraph.types import Command, Interrupt
 from langsmith import Client as LangsmithClient
@@ -115,9 +115,9 @@ async def _handle_input(user_input: UserInput, agent: Pregel) -> tuple[dict[str,
     callbacks = []
     if settings.LANGFUSE_TRACING:
         # Initialize Langfuse CallbackHandler for Langchain (tracing)
-        langfuse_handler = CallbackHandler()
-
-        callbacks.append(langfuse_handler)
+        # langfuse_handler = CallbackHandler()
+        # callbacks.append(langfuse_handler)
+        pass
 
     if user_input.agent_config:
         if overlap := configurable.keys() & user_input.agent_config.keys():

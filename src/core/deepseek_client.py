@@ -3,6 +3,7 @@ Simplified DeepSeek HTTP Client
 Direct HTTP integration with DeepSeek API for SQL Agent
 """
 import json
+import logging
 import requests
 from typing import Dict, List, Any, Optional, AsyncGenerator
 from dataclasses import dataclass
@@ -12,6 +13,8 @@ from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 from core.settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -54,15 +57,16 @@ class DeepSeekHTTPClient:
         return converted
     
     def chat_completion(
-        self, 
-        messages: List[BaseMessage], 
+        self,
+        messages: List[BaseMessage],
         tools: Optional[List[Dict[str, Any]]] = None,
         temperature: float = 0.5,
         max_tokens: Optional[int] = None,
         stream: bool = False
     ) -> DeepSeekResponse:
         """Send chat completion request to DeepSeek API"""
-        
+        logger.info(f"🤖 DeepSeek API call: {len(messages)} messages, tools={bool(tools)}")
+
         data = {
             "model": "deepseek-chat",
             "messages": self._convert_messages(messages),
@@ -78,28 +82,35 @@ class DeepSeekHTTPClient:
             data["tool_choice"] = "auto"
         
         try:
+            logger.debug(f"📤 Sending request to DeepSeek API: {len(str(data))} chars")
             response = requests.post(
                 f"{self.base_url}/chat/completions",
                 headers=self.headers,
                 json=data,
                 timeout=30
             )
-            
+
             if response.status_code != 200:
+                logger.error(f"❌ DeepSeek API error: {response.status_code} - {response.text}")
                 raise Exception(f"DeepSeek API error: {response.status_code} - {response.text}")
-            
+
             result = response.json()
             choice = result['choices'][0]
             message = choice['message']
-            
+
+            logger.info(f"✅ DeepSeek API response: {choice.get('finish_reason')}, content_length={len(message.get('content', ''))}")
+            if message.get('tool_calls'):
+                logger.info(f"🔧 Tool calls returned: {len(message.get('tool_calls', []))}")
+
             return DeepSeekResponse(
                 content=message.get('content', ''),
                 tool_calls=message.get('tool_calls'),
                 usage=result.get('usage'),
                 finish_reason=choice.get('finish_reason')
             )
-            
+
         except Exception as e:
+            logger.error(f"❌ DeepSeek API request failed: {e}")
             raise Exception(f"DeepSeek API request failed: {e}")
 
 

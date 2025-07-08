@@ -3,6 +3,7 @@ SQL Agent - Intelligent Database Assistant
 Implements 4-phase workflow: Planning → Tool Selection → Execution → Reflection
 Based on PDME-PoC architecture adapted for LangGraph framework
 """
+import logging
 from datetime import datetime
 from typing import Dict, List, Any, Literal, Optional
 import json
@@ -19,6 +20,8 @@ from agents.llama_guard import LlamaGuard, LlamaGuardOutput, SafetyAssessment
 from core import get_model, settings
 from core.deepseek_client import get_deepseek_client
 from core.database import get_database_client
+
+logger = logging.getLogger(__name__)
 
 
 class SQLAgentState(MessagesState, total=False):
@@ -43,11 +46,15 @@ def get_database_schema() -> str:
     Get the current database schema information including all tables and columns.
     This tool provides a complete overview of the database structure.
     """
+    logger.info("🔍 Executing get_database_schema tool")
     try:
         db_client = get_database_client()
+        logger.info(f"📊 Database client initialized: {db_client.db_path}")
         schema_info = db_client.get_schema_info()
+        logger.info(f"✅ Schema info retrieved: {len(schema_info.get('tables', {}))} tables found")
 
         if "error" in schema_info:
+            logger.error(f"❌ Error retrieving schema: {schema_info['error']}")
             return f"Error retrieving schema: {schema_info['error']}"
 
         # Format schema information for display
@@ -63,9 +70,11 @@ def get_database_schema() -> str:
                 result += f"  - {column['name']} {column['type']}{pk_marker}{null_marker}{default_marker}\n"
             result += "\n"
 
+        logger.info(f"📋 Schema formatted successfully, {len(result)} characters")
         return result
 
     except Exception as e:
+        logger.error(f"❌ Error accessing database schema: {str(e)}")
         return f"Error accessing database schema: {str(e)}"
 
 
