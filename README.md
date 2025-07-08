@@ -19,29 +19,21 @@ This project offers a template for you to easily build and run your own agents u
 
 ### Quickstart
 
-Run directly in python
+**Simplified Setup for Global Python Environment**
 
 ```sh
-# At least one LLM API key is required
-echo 'OPENAI_API_KEY=your_openai_api_key' >> .env
+# At least one LLM API key is required (DeepSeek recommended)
+echo 'DEEPSEEK_API_KEY=your_deepseek_api_key' >> .env
+echo 'DEEPSEEK_BASE_URL=https://api.deepseek.com' >> .env
 
-# uv is recommended but "pip install ." also works
-pip install uv
-uv sync --frozen
-# "uv sync" creates .venv automatically
-source .venv/bin/activate
+# Install dependencies globally (no virtual environment needed)
+pip install -r requirements.txt
+
+# Run the service
 python src/run_service.py
 
-# In another shell
-source .venv/bin/activate
+# In another terminal, run the Streamlit app
 streamlit run src/streamlit_app.py
-```
-
-Run with docker
-
-```sh
-echo 'OPENAI_API_KEY=your_openai_api_key' >> .env
-docker compose watch
 ```
 
 ### Architecture Diagram
@@ -84,9 +76,9 @@ The repository is structured as follows:
    ```
 
 2. Set up environment variables:
-   Create a `.env` file in the root directory. At least one LLM API key or configuration is required. See the [`.env.example` file](./.env.example) for a full list of available environment variables, including a variety of model provider API keys, header-based authentication, LangSmith tracing, testing and development modes, and OpenWeatherMap API key.
+   Create a `.env` file in the root directory. DeepSeek API key is recommended for optimal SQL Agent performance. See the [`.env.example` file](./.env.example) for a full list of available environment variables.
 
-3. You can now run the agent service and the Streamlit app locally, either with Docker or just using Python. The Docker setup is recommended for simpler environment setup and immediate reloading of the services when you make changes to your code.
+3. Install dependencies and run the services using Python directly (no Docker or virtual environment needed).
 
 ### Additional setup for specific AI providers
 
@@ -108,42 +100,34 @@ To customize the agent for your own use case:
 If your agents or chosen LLM require file-based credential files or certificates, the `privatecredentials/` has been provided for your development convenience. All contents, excluding the `.gitkeep` files, are ignored by git and docker's build process. See [Working with File-based Credentials](docs/File_Based_Credentials.md) for suggested use.
 
 
-### Docker Setup
+### Simplified Local Development
 
-This project includes a Docker setup for easy development and deployment. The `compose.yaml` file defines three services: `postgres`, `agent_service` and `streamlit_app`. The `Dockerfile` for each service is in their respective directories.
+This project now uses a simplified setup without Docker or virtual environments for easier local development.
 
-For local development, we recommend using [docker compose watch](https://docs.docker.com/compose/file-watch/). This feature allows for a smoother development experience by automatically updating your containers when changes are detected in your source code.
+1. Install Python dependencies globally:
+   ```sh
+   pip install -r requirements.txt
+   ```
 
-1. Make sure you have Docker and Docker Compose (>=[2.23.0](https://docs.docker.com/compose/release-notes/#2230)) installed on your system.
-
-2. Create a `.env` file from the `.env.example`. At minimum, you need to provide an LLM API key (e.g., OPENAI_API_KEY).
+2. Create a `.env` file from the `.env.example`. DeepSeek API key is recommended:
    ```sh
    cp .env.example .env
-   # Edit .env to add your API keys
+   # Edit .env to add your DeepSeek API key
    ```
 
-3. Build and launch the services in watch mode:
-
+3. Start the agent service:
    ```sh
-   docker compose watch
+   python src/run_service.py
    ```
 
-   This will automatically:
-   - Start a PostgreSQL database service that the agent service connects to
-   - Start the agent service with FastAPI
-   - Start the Streamlit app for the user interface
-
-4. The services will now automatically update when you make changes to your code:
-   - Changes in the relevant python files and directories will trigger updates for the relevant services.
-   - NOTE: If you make changes to the `pyproject.toml` or `uv.lock` files, you will need to rebuild the services by running `docker compose up --build`.
+4. In another terminal, start the Streamlit app:
+   ```sh
+   streamlit run src/streamlit_app.py
+   ```
 
 5. Access the Streamlit app by navigating to `http://localhost:8501` in your web browser.
 
-6. The agent service API will be available at `http://0.0.0.0:8080`. You can also use the OpenAPI docs at `http://0.0.0.0:8080/redoc`.
-
-7. Use `docker compose down` to stop the services.
-
-This setup allows you to develop and test your changes in real-time without manually restarting the services.
+6. The agent service API will be available at `http://localhost:8080`. You can also use the OpenAPI docs at `http://localhost:8080/redoc`.
 
 ### Building other apps on the AgentClient
 
@@ -170,31 +154,27 @@ The agent supports [LangGraph Studio](https://langchain-ai.github.io/langgraph/c
 
 `langgraph-cli[inmem]` is installed with `uv sync`. You can simply add your `.env` file to the root directory as described above, and then launch LangGraph Studio with `langgraph dev`. Customize `langgraph.json` as needed. See the [local quickstart](https://langchain-ai.github.io/langgraph/cloud/how-tos/studio/quick_start/#local-development-server) to learn more.
 
-### Local development without Docker
+### Alternative Setup with UV Package Manager
 
-You can also run the agent service and the Streamlit app locally without Docker, just using a Python virtual environment.
+If you prefer using the UV package manager:
 
-1. Create a virtual environment and install dependencies:
-
+1. Install UV and dependencies:
    ```sh
    pip install uv
    uv sync --frozen
-   source .venv/bin/activate
    ```
 
 2. Run the FastAPI server:
-
    ```sh
    python src/run_service.py
    ```
 
 3. In a separate terminal, run the Streamlit app:
-
    ```sh
    streamlit run src/streamlit_app.py
    ```
 
-4. Open your browser and navigate to the URL provided by Streamlit (usually `http://localhost:8501`).
+4. Open your browser and navigate to `http://localhost:8501`.
 
 ## Projects built with or inspired by agent-service-toolkit
 
@@ -215,8 +195,8 @@ Contributions are welcome! Please feel free to submit a Pull Request. Currently 
 2. Install the development dependencies and pre-commit hooks:
 
    ```sh
-   pip install uv
-   uv sync --frozen
+   pip install -r requirements.txt
+   pip install pytest pytest-cov pytest-env pytest-asyncio ruff mypy pre-commit
    pre-commit install
    ```
 

@@ -140,8 +140,16 @@ class Settings(BaseSettings):
         if not active_keys:
             raise ValueError("At least one LLM API key must be provided.")
 
+        # Prioritize DeepSeek for SQL Agent
+        if Provider.DEEPSEEK in active_keys:
+            self.DEFAULT_MODEL = DeepseekModelName.DEEPSEEK_CHAT
+            self.AVAILABLE_MODELS.update(set(DeepseekModelName))
+
         for provider in active_keys:
             match provider:
+                case Provider.DEEPSEEK:
+                    # Already handled above with priority
+                    pass
                 case Provider.OPENAI:
                     if self.DEFAULT_MODEL is None:
                         self.DEFAULT_MODEL = OpenAIModelName.GPT_4O_MINI
@@ -150,10 +158,6 @@ class Settings(BaseSettings):
                     if self.DEFAULT_MODEL is None:
                         self.DEFAULT_MODEL = OpenAICompatibleName.OPENAI_COMPATIBLE
                     self.AVAILABLE_MODELS.update(set(OpenAICompatibleName))
-                case Provider.DEEPSEEK:
-                    if self.DEFAULT_MODEL is None:
-                        self.DEFAULT_MODEL = DeepseekModelName.DEEPSEEK_CHAT
-                    self.AVAILABLE_MODELS.update(set(DeepseekModelName))
                 case Provider.ANTHROPIC:
                     if self.DEFAULT_MODEL is None:
                         self.DEFAULT_MODEL = AnthropicModelName.HAIKU_3

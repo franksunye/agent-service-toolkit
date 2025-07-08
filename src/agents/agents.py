@@ -8,11 +8,12 @@ from agents.command_agent import command_agent
 from agents.interrupt_agent import interrupt_agent
 from agents.knowledge_base_agent import kb_agent
 from agents.langgraph_supervisor_agent import langgraph_supervisor_agent
-from agents.rag_assistant import rag_assistant
+# from agents.rag_assistant import rag_assistant  # Temporarily disabled due to chromadb dependency
 from agents.research_assistant import research_assistant
+from agents.sql_agent import sql_agent
 from schema import AgentInfo
 
-DEFAULT_AGENT = "research-assistant"
+DEFAULT_AGENT = "sql-agent"
 
 
 @dataclass
@@ -22,13 +23,17 @@ class Agent:
 
 
 agents: dict[str, Agent] = {
+    "sql-agent": Agent(
+        description="An intelligent SQL database assistant with 4-phase workflow for database operations and analysis.",
+        graph=sql_agent
+    ),
     "chatbot": Agent(description="A simple chatbot.", graph=chatbot),
     "research-assistant": Agent(
         description="A research assistant with web search and calculator.", graph=research_assistant
     ),
-    "rag-assistant": Agent(
-        description="A RAG assistant with access to information in a database.", graph=rag_assistant
-    ),
+    # "rag-assistant": Agent(
+    #     description="A RAG assistant with access to information in a database.", graph=rag_assistant
+    # ),
     "command-agent": Agent(description="A command agent.", graph=command_agent),
     "bg-task-agent": Agent(description="A background task agent.", graph=bg_task_agent),
     "langgraph-supervisor-agent": Agent(
