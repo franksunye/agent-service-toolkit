@@ -18,6 +18,7 @@ from langgraph.prebuilt import ToolNode
 from agents.llama_guard import LlamaGuard, LlamaGuardOutput, SafetyAssessment
 from core import get_model, settings
 from core.deepseek_client import get_deepseek_client
+from core.database import get_database_client
 
 
 class SQLAgentState(MessagesState, total=False):
@@ -42,61 +43,64 @@ def get_database_schema() -> str:
     Get the current database schema information including all tables and columns.
     This tool provides a complete overview of the database structure.
     """
-    # TODO: Implement actual database connection
-    # For now, return a sample schema
-    return """
-    Current Database Schema:
-    
-    Table: users
-      - id INTEGER PRIMARY KEY
-      - name TEXT NOT NULL
-      - email TEXT UNIQUE
-      - age INTEGER
-      - created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    
-    Table: orders
-      - id INTEGER PRIMARY KEY
-      - user_id INTEGER FOREIGN KEY REFERENCES users(id)
-      - product_name TEXT NOT NULL
-      - amount DECIMAL(10,2)
-      - order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    
-    Table: products
-      - id INTEGER PRIMARY KEY
-      - name TEXT NOT NULL
-      - price DECIMAL(10,2)
-      - category TEXT
-      - stock_quantity INTEGER
-    """
+    try:
+        db_client = get_database_client()
+        schema_info = db_client.get_schema_info()
+
+        if "error" in schema_info:
+            return f"Error retrieving schema: {schema_info['error']}"
+
+        # Format schema information for display
+        result = f"Database Schema ({schema_info['database_type']}):\n"
+        result += f"Location: {schema_info['database_path']}\n\n"
+
+        for table_name, table_info in schema_info["tables"].items():
+            result += f"Table: {table_name} ({table_info['row_count']} rows)\n"
+            for column in table_info["columns"]:
+                pk_marker = " PRIMARY KEY" if column["primary_key"] else ""
+                null_marker = " NOT NULL" if column["not_null"] else ""
+                default_marker = f" DEFAULT {column['default_value']}" if column["default_value"] else ""
+                result += f"  - {column['name']} {column['type']}{pk_marker}{null_marker}{default_marker}\n"
+            result += "\n"
+
+        return result
+
+    except Exception as e:
+        return f"Error accessing database schema: {str(e)}"
 
 
 @tool
 def execute_sql_query(sql_query: str, user_request: str = "") -> str:
     """
     Execute a SQL query safely and return the results.
-    
+
     Args:
         sql_query: The SQL query to execute
         user_request: The original user request for context
-    
+
     Returns:
         JSON string containing query results and metadata
     """
-    # TODO: Implement actual SQL execution with safety checks
-    # For now, return a sample result
-    sample_result = {
-        "success": True,
-        "query": sql_query,
-        "user_request": user_request,
-        "results": [
-            {"id": 1, "name": "John Doe", "email": "john@example.com", "age": 30},
-            {"id": 2, "name": "Jane Smith", "email": "jane@example.com", "age": 25},
-            {"id": 3, "name": "Bob Johnson", "email": "bob@example.com", "age": 35}
-        ],
-        "row_count": 3,
-        "execution_time_ms": 45
-    }
-    return json.dumps(sample_result, indent=2)
+    try:
+        db_client = get_database_client()
+        result = db_client.execute_query(sql_query)
+
+        # Add user request context
+        result["user_request"] = user_request
+        result["timestamp"] = datetime.now().isoformat()
+
+        return json.dumps(result, indent=2, default=str)
+
+    except Exception as e:
+        error_result = {
+            "success": False,
+            "error": str(e),
+            "error_type": "EXECUTION_ERROR",
+            "query": sql_query,
+            "user_request": user_request,
+            "timestamp": datetime.now().isoformat()
+        }
+        return json.dumps(error_result, indent=2)
 
 
 @tool
@@ -112,76 +116,137 @@ def analyze_query_results(query_result: str, context: str = "") -> str:
         Analysis insights and recommendations
     """
     try:
-        # Parse the query result
+        # Parse the query result to validate it's proper JSON
         result_data = json.loads(query_result)
-        
+
+        # Check if the query was successful
+        if not result_data.get("success", False):
+            return f"Cannot analyze failed query: {result_data.get('error', 'Unknown error')}"
+
         # Use DeepSeek for intelligent analysis
         client = get_deepseek_client()
-        
+
         analysis_prompt = f"""
         Analyze the following SQL query results and provide business insights:
-        
+
         Query Results: {query_result}
         Context: {context}
-        
+
         Please provide:
         1. Key findings from the data
         2. Business insights and patterns
         3. Recommendations for action
         4. Any data quality observations
-        
+        5. Statistical summary if applicable
+
         Keep the analysis concise but valuable.
         """
-        
+
         messages = [
             HumanMessage(content=analysis_prompt)
         ]
-        
+
         response = client.chat_completion(messages, temperature=0.3)
         return response.content
-        
+
+    except json.JSONDecodeError:
+        return f"Invalid query result format: {query_result[:200]}..."
     except Exception as e:
         return f"Analysis failed: {str(e)}"
 
 
 @tool
-def analyze_database_schema(schema_info: str) -> str:
+def analyze_database_schema(schema_info: str = "") -> str:
     """
     Analyze database schema and provide optimization recommendations.
-    
+
     Args:
-        schema_info: Database schema information
-    
+        schema_info: Optional database schema information (if empty, will fetch current schema)
+
     Returns:
         Schema analysis and optimization recommendations
     """
     try:
+        # If no schema info provided, get current schema
+        if not schema_info:
+            schema_info = get_database_schema()
+
         client = get_deepseek_client()
-        
+
         analysis_prompt = f"""
         Analyze the following database schema and provide recommendations:
-        
+
         Schema: {schema_info}
-        
+
         Please evaluate:
-        1. Schema design quality
-        2. Potential performance issues
-        3. Missing indexes or constraints
-        4. Normalization opportunities
-        5. Security considerations
-        
-        Provide specific, actionable recommendations.
+        1. Schema design quality and best practices
+        2. Potential performance issues and bottlenecks
+        3. Missing indexes or constraints that should be added
+        4. Normalization opportunities and data redundancy
+        5. Security considerations and vulnerabilities
+        6. Data type optimization suggestions
+        7. Relationship integrity and foreign key usage
+
+        Provide specific, actionable recommendations with examples where appropriate.
         """
-        
+
         messages = [
             HumanMessage(content=analysis_prompt)
         ]
-        
+
         response = client.chat_completion(messages, temperature=0.3)
         return response.content
-        
+
     except Exception as e:
         return f"Schema analysis failed: {str(e)}"
+
+
+@tool
+def generate_sql_query(user_request: str, schema_context: str = "") -> str:
+    """
+    Generate a SQL query based on user request and database schema.
+
+    Args:
+        user_request: Natural language description of what the user wants
+        schema_context: Optional database schema context (if empty, will fetch current schema)
+
+    Returns:
+        Generated SQL query with explanation
+    """
+    try:
+        # If no schema context provided, get current schema
+        if not schema_context:
+            schema_context = get_database_schema()
+
+        client = get_deepseek_client()
+
+        query_prompt = f"""
+        Generate a SQL query based on the user request and database schema.
+
+        Database Schema:
+        {schema_context}
+
+        User Request: {user_request}
+
+        Please provide:
+        1. A safe, efficient SQL query that fulfills the request
+        2. Brief explanation of what the query does
+        3. Any assumptions made
+        4. Potential limitations or considerations
+
+        Only generate SELECT, INSERT, UPDATE, or CREATE TABLE queries.
+        Use proper SQL syntax and best practices.
+        """
+
+        messages = [
+            HumanMessage(content=query_prompt)
+        ]
+
+        response = client.chat_completion(messages, temperature=0.2)
+        return response.content
+
+    except Exception as e:
+        return f"Query generation failed: {str(e)}"
 
 
 # Define available tools
@@ -189,7 +254,8 @@ sql_tools = [
     get_database_schema,
     execute_sql_query,
     analyze_query_results,
-    analyze_database_schema
+    analyze_database_schema,
+    generate_sql_query
 ]
 
 # Create tool node
@@ -222,24 +288,27 @@ async def planning_phase(state: SQLAgentState, config: RunnableConfig) -> SQLAge
     # Create planning prompt
     planning_prompt = f"""
     You are an intelligent SQL database assistant. Analyze the user's request and plan the appropriate tools to use.
-    
+
     Available tools:
     1. get_database_schema - Get database structure information
-    2. execute_sql_query - Execute SQL queries safely
-    3. analyze_query_results - Analyze query results for insights
-    4. analyze_database_schema - Analyze database design
-    
+    2. generate_sql_query - Generate SQL queries from natural language
+    3. execute_sql_query - Execute SQL queries safely
+    4. analyze_query_results - Analyze query results for insights
+    5. analyze_database_schema - Analyze database design and optimization
+
     Current database schema:
     {schema_info}
-    
+
     User request: {last_message.content}
-    
+
     Plan the sequence of tools needed to fulfill this request. Consider:
-    - What information do you need?
+    - Does the user need schema information?
+    - Should I generate a SQL query first or do they have one ready?
     - What SQL queries might be required?
-    - Should results be analyzed for insights?
-    
-    Use function calling to specify the tools and their parameters.
+    - Should results be analyzed for business insights?
+    - Are they asking for database optimization advice?
+
+    Use function calling to specify the tools and their parameters in the optimal order.
     """
     
     # Get model and make planning decision
