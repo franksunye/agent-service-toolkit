@@ -51,10 +51,14 @@ def format_sql_result(content: str) -> None:
                             # Convert to DataFrame for better display
                             import pandas as pd
                             df = pd.DataFrame(results)
-                            st.dataframe(df, use_container_width=True)
+                            st.dataframe(df, use_container_width=True, hide_index=True)
 
-                            # Show summary info
-                            st.caption(f"📊 {len(results)} rows returned")
+                            # Show summary info with more details
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.caption(f"📊 **{len(results)}** rows returned")
+                            with col2:
+                                st.caption(f"📋 **{len(df.columns)}** columns")
                         else:
                             # Simple list results
                             for i, row in enumerate(results[:10]):  # Limit display
@@ -64,28 +68,43 @@ def format_sql_result(content: str) -> None:
 
                     # Show query metadata
                     if "query" in result_data:
-                        with st.expander("Query Details"):
+                        with st.expander("🔍 Query Details"):
                             st.code(result_data["query"], language="sql")
-                            if "row_count" in result_data:
-                                st.write(f"Rows affected: {result_data['row_count']}")
-                            if "query_type" in result_data:
-                                st.write(f"Query type: {result_data['query_type']}")
+
+                            # Show metadata in columns for better layout
+                            if "row_count" in result_data or "query_type" in result_data:
+                                col1, col2 = st.columns(2)
+                                if "row_count" in result_data:
+                                    with col1:
+                                        st.metric("Rows Returned", result_data["row_count"])
+                                if "query_type" in result_data:
+                                    with col2:
+                                        st.metric("Query Type", result_data["query_type"])
 
                 elif "rows_affected" in result_data:
-                    # Display modification results
-                    st.success(f"✅ Query executed successfully. {result_data['rows_affected']} rows affected.")
+                    # Display modification results with better formatting
+                    rows_affected = result_data['rows_affected']
+                    st.success(f"✅ **Query executed successfully!**")
+                    st.metric("Rows Affected", rows_affected)
+
                     if "query" in result_data:
-                        with st.expander("Query Details"):
+                        with st.expander("🔍 View Executed Query"):
                             st.code(result_data["query"], language="sql")
                 else:
                     # Other successful results
                     st.write(content)
             else:
-                # Display error results
-                st.error(f"❌ Query failed: {result_data.get('error', 'Unknown error')}")
+                # Display error results with better formatting
+                error_msg = result_data.get('error', 'Unknown error')
+                st.error(f"❌ **Query Failed**: {error_msg}")
+
                 if "query" in result_data:
-                    with st.expander("Failed Query"):
+                    with st.expander("🔍 View Failed Query"):
                         st.code(result_data["query"], language="sql")
+
+                # Show error type if available
+                if "error_type" in result_data:
+                    st.caption(f"Error Type: {result_data['error_type']}")
         else:
             # Not a SQL result, display normally
             st.write(content)
@@ -253,7 +272,7 @@ async def main() -> None:
     if len(messages) == 0:
         match agent_client.agent:
             case "sql-agent":
-                WELCOME = """Hello! I'm an intelligent SQL database assistant. I can help you with:
+                WELCOME = """Hello! I'm an intelligent SQL database assistant with access to your SQLite database. I can help you with:
 
 • **Database Exploration** - View table structures and relationships
 • **Query Generation** - Convert your questions into SQL queries
