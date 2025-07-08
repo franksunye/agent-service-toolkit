@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import urllib.parse
 import uuid
@@ -25,6 +26,73 @@ from schema.task_data import TaskData, TaskDataStatus
 
 APP_TITLE = "Agent Service Toolkit"
 APP_ICON = "🧰"
+
+
+def format_sql_result(content: str) -> None:
+    """
+    Format and display SQL query results in a user-friendly way.
+    Detects JSON results from SQL tools and displays them as tables when appropriate.
+    """
+    try:
+        # Try to parse as JSON (SQL tool results)
+        result_data = json.loads(content)
+
+        # Check if this is a SQL query result
+        if isinstance(result_data, dict) and "success" in result_data:
+            if result_data.get("success"):
+                # Display successful query results
+                if "results" in result_data and result_data["results"]:
+                    st.write("**Query Results:**")
+
+                    # Display as interactive table if we have tabular data
+                    results = result_data["results"]
+                    if isinstance(results, list) and len(results) > 0:
+                        if isinstance(results[0], dict):
+                            # Convert to DataFrame for better display
+                            import pandas as pd
+                            df = pd.DataFrame(results)
+                            st.dataframe(df, use_container_width=True)
+
+                            # Show summary info
+                            st.caption(f"📊 {len(results)} rows returned")
+                        else:
+                            # Simple list results
+                            for i, row in enumerate(results[:10]):  # Limit display
+                                st.write(f"{i+1}. {row}")
+                            if len(results) > 10:
+                                st.caption(f"... and {len(results) - 10} more rows")
+
+                    # Show query metadata
+                    if "query" in result_data:
+                        with st.expander("Query Details"):
+                            st.code(result_data["query"], language="sql")
+                            if "row_count" in result_data:
+                                st.write(f"Rows affected: {result_data['row_count']}")
+                            if "query_type" in result_data:
+                                st.write(f"Query type: {result_data['query_type']}")
+
+                elif "rows_affected" in result_data:
+                    # Display modification results
+                    st.success(f"✅ Query executed successfully. {result_data['rows_affected']} rows affected.")
+                    if "query" in result_data:
+                        with st.expander("Query Details"):
+                            st.code(result_data["query"], language="sql")
+                else:
+                    # Other successful results
+                    st.write(content)
+            else:
+                # Display error results
+                st.error(f"❌ Query failed: {result_data.get('error', 'Unknown error')}")
+                if "query" in result_data:
+                    with st.expander("Failed Query"):
+                        st.code(result_data["query"], language="sql")
+        else:
+            # Not a SQL result, display normally
+            st.write(content)
+
+    except (json.JSONDecodeError, ImportError):
+        # Not JSON or pandas not available, display as plain text
+        st.write(content)
 USER_ID_COOKIE = "user_id"
 
 
@@ -184,6 +252,21 @@ async def main() -> None:
 
     if len(messages) == 0:
         match agent_client.agent:
+            case "sql-agent":
+                WELCOME = """Hello! I'm an intelligent SQL database assistant. I can help you with:
+
+• **Database Exploration** - View table structures and relationships
+• **Query Generation** - Convert your questions into SQL queries
+• **Data Analysis** - Execute queries and provide business insights
+• **Schema Optimization** - Analyze and recommend database improvements
+
+**Example queries to try:**
+- "What tables are in the database?"
+- "Show me all users in the Engineering department"
+- "What are the total sales by user?"
+- "Analyze the database schema for optimization opportunities"
+
+Ask me anything about your database!"""
             case "chatbot":
                 WELCOME = "Hello! I'm a simple chatbot. Ask me anything!"
             case "interrupt-agent":
@@ -349,7 +432,11 @@ async def draw_messages(
                             if tool_result.tool_call_id:
                                 status = call_results[tool_result.tool_call_id]
                             status.write("Output:")
-                            status.write(tool_result.content)
+
+                            # Use enhanced formatting for SQL results
+                            with status:
+                                format_sql_result(tool_result.content)
+
                             status.update(state="complete")
 
             case "custom":
