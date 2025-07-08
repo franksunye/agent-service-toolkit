@@ -1,4 +1,9 @@
-from typing import Any, Literal, NotRequired
+from typing import Any, Literal
+try:
+    from typing import NotRequired
+except ImportError:
+    # Python < 3.11 compatibility
+    from typing_extensions import NotRequired
 
 from pydantic import BaseModel, Field, SerializeAsAny
 from typing_extensions import TypedDict

@@ -1,4 +1,10 @@
-from enum import StrEnum, auto
+try:
+    from enum import StrEnum, auto
+except ImportError:
+    # Python < 3.11 compatibility
+    from enum import Enum, auto
+    class StrEnum(str, Enum):
+        pass
 from typing import TypeAlias
 
 

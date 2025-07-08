@@ -285,18 +285,24 @@ async def planning_phase(state: SQLAgentState, config: RunnableConfig) -> SQLAge
     Phase 1: Planning - Analyze user intent and plan tool usage
     This is the core intelligence of the SQL Agent
     """
+    logger.info("🚀 Starting planning phase")
     messages = state["messages"]
     last_message = messages[-1] if messages else None
-    
+
     if not last_message:
+        logger.warning("❌ No user input received in planning phase")
         return {"messages": [AIMessage(content="No user input received.")]}
-    
+
+    logger.info(f"📝 User request: {last_message.content}")
+
     # Get database context
+    logger.info("🔍 Getting database schema for context")
     schema_info = get_database_schema.invoke({})
-    
+    logger.info(f"📊 Schema info retrieved: {len(schema_info)} characters")
+
     # Create planning prompt
     planning_prompt = f"""
-    You are an intelligent SQL database assistant. Analyze the user's request and plan the appropriate tools to use.
+    You are an intelligent SQL database assistant. You MUST use the available tools to answer user questions.
 
     Available tools:
     1. get_database_schema - Get database structure information
@@ -310,33 +316,52 @@ async def planning_phase(state: SQLAgentState, config: RunnableConfig) -> SQLAge
 
     User request: {last_message.content}
 
-    Plan the sequence of tools needed to fulfill this request. Consider:
-    - Does the user need schema information?
-    - Should I generate a SQL query first or do they have one ready?
-    - What SQL queries might be required?
-    - Should results be analyzed for business insights?
-    - Are they asking for database optimization advice?
+    For the user's request "{last_message.content}", you should:
+    1. If they're asking about tables/schema: Use get_database_schema
+    2. If they need data queried: Use execute_sql_query with appropriate SQL
+    3. If they need analysis: Use analyze_query_results or analyze_database_schema
 
-    Use function calling to specify the tools and their parameters in the optimal order.
+    You MUST call the appropriate tools. Do not just provide a text response.
     """
-    
+
     # Get model and make planning decision
-    model = get_model(config["configurable"].get("model", settings.DEFAULT_MODEL))
+    model_name = config["configurable"].get("model", settings.DEFAULT_MODEL)
+    logger.info(f"🤖 Using model: {model_name}")
+
+    model = get_model(model_name)
     model_with_tools = model.bind_tools(sql_tools)
-    
+    logger.info(f"🔧 Model bound with {len(sql_tools)} tools")
+
     planning_messages = [
         SystemMessage(content=planning_prompt),
         last_message
     ]
-    
+
+    logger.info("💭 Invoking model for planning decision")
     response = await model_with_tools.ainvoke(planning_messages, config)
-    
+
+    # Debug the response
+    logger.info(f"📤 Model response type: {type(response)}")
+    logger.info(f"📤 Model response content: {response.content[:200]}...")
+    logger.info(f"📤 Has tool_calls attribute: {hasattr(response, 'tool_calls')}")
+
+    if hasattr(response, 'tool_calls'):
+        logger.info(f"🔧 Tool calls: {response.tool_calls}")
+        if response.tool_calls:
+            logger.info(f"✅ {len(response.tool_calls)} tool calls generated")
+        else:
+            logger.warning("⚠️ tool_calls attribute exists but is empty")
+    else:
+        logger.error("❌ Response has no tool_calls attribute")
+
     # Store planning result in state
     planning_result = {
         "planned_tools": response.tool_calls if hasattr(response, 'tool_calls') else [],
         "reasoning": response.content
     }
-    
+
+    logger.info(f"📋 Planning result: {planning_result}")
+
     return {
         "messages": [response],
         "planning_result": planning_result,
@@ -346,11 +371,28 @@ async def planning_phase(state: SQLAgentState, config: RunnableConfig) -> SQLAge
 
 async def should_use_tools(state: SQLAgentState) -> Literal["tools", "reflection"]:
     """Determine if tools should be executed or move to reflection"""
+    logger.info("🤔 Determining whether to use tools or go to reflection")
+
     last_message = state["messages"][-1]
-    
-    if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
-        return "tools"
+    logger.info(f"📨 Last message type: {type(last_message)}")
+    logger.info(f"📨 Last message content: {last_message.content[:100]}...")
+
+    has_tool_calls_attr = hasattr(last_message, 'tool_calls')
+    logger.info(f"🔧 Has tool_calls attribute: {has_tool_calls_attr}")
+
+    if has_tool_calls_attr:
+        tool_calls = last_message.tool_calls
+        logger.info(f"🔧 Tool calls: {tool_calls}")
+        logger.info(f"🔧 Tool calls length: {len(tool_calls) if tool_calls else 0}")
+
+        if tool_calls:
+            logger.info("✅ Going to tools node")
+            return "tools"
+        else:
+            logger.info("⚠️ No tool calls found, going to reflection")
+            return "reflection"
     else:
+        logger.info("❌ No tool_calls attribute, going to reflection")
         return "reflection"
 
 

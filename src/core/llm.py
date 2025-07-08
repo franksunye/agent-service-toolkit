@@ -29,11 +29,58 @@ _MODEL_TABLE = (
 
 
 class FakeToolModel(FakeListChatModel):
-    def __init__(self, responses: list[str]):
+    def __init__(self, responses: list[str] = None):
+        if responses is None:
+            # Default responses that include tool calls for SQL Agent testing
+            responses = [
+                "I'll help you with your database query. Let me check the database schema first."
+            ]
         super().__init__(responses=responses)
+        self._tools = []
 
     def bind_tools(self, tools):
-        return self
+        """Bind tools and return a new instance that can generate tool calls"""
+        new_model = FakeToolModel(self.responses)
+        new_model._tools = tools
+        return new_model
+
+    async def ainvoke(self, messages, config=None, **kwargs):
+        """Override to generate tool calls for SQL-related queries"""
+        from langchain_core.messages import AIMessage
+
+        # Get the last human message
+        last_message = None
+        for msg in reversed(messages):
+            if hasattr(msg, 'content') and msg.content:
+                last_message = msg.content.lower()
+                break
+
+        # If this looks like a database query and we have tools, generate tool calls
+        if (last_message and
+            any(keyword in last_message for keyword in ['table', 'database', 'schema', 'query', 'sql']) and
+            self._tools):
+
+            # Generate appropriate tool call based on the query
+            tool_call = None
+            if 'table' in last_message or 'schema' in last_message:
+                # Use get_database_schema tool
+                for tool in self._tools:
+                    if hasattr(tool, 'name') and tool.name == 'get_database_schema':
+                        tool_call = {
+                            "name": "get_database_schema",
+                            "args": {},
+                            "id": "call_get_schema_001"
+                        }
+                        break
+
+            if tool_call:
+                return AIMessage(
+                    content="I'll check the database schema for you.",
+                    tool_calls=[tool_call]
+                )
+
+        # Fall back to default behavior
+        return await super().ainvoke(messages, config, **kwargs)
 
 
 # Simplified model type alias for core models
@@ -54,18 +101,37 @@ def get_model(model_name: AllModelEnum, /) -> ModelT:
     if not api_model_name:
         raise ValueError(f"Unsupported model: {model_name}")
 
+    # Handle string model names by converting to enum
+    if isinstance(model_name, str):
+        # Try to find the enum value
+        for enum_class in [DeepseekModelName, OpenAIModelName, OpenAICompatibleName, FakeModelName]:
+            try:
+                model_name = enum_class(model_name)
+                break
+            except ValueError:
+                continue
+        else:
+            # If not found in any enum, try to match by value
+            for enum_class in [DeepseekModelName, OpenAIModelName, OpenAICompatibleName, FakeModelName]:
+                for enum_val in enum_class:
+                    if enum_val.value == model_name:
+                        model_name = enum_val
+                        break
+                if not isinstance(model_name, str):
+                    break
+
     # Primary: DeepSeek models (recommended for SQL Agent)
-    if model_name in DeepseekModelName:
+    if isinstance(model_name, DeepseekModelName):
         return get_deepseek_model()
 
     # Fallback: OpenAI models for compatibility
-    if model_name in OpenAIModelName:
+    if isinstance(model_name, OpenAIModelName):
         if not settings.OPENAI_API_KEY:
             raise ValueError("OpenAI API key must be configured")
         return ChatOpenAI(model=api_model_name, temperature=0.5, streaming=True)
 
     # Generic OpenAI-compatible models
-    if model_name in OpenAICompatibleName:
+    if isinstance(model_name, OpenAICompatibleName):
         if not settings.COMPATIBLE_BASE_URL or not settings.COMPATIBLE_MODEL:
             raise ValueError("Compatible model base URL and model name must be configured")
         return ChatOpenAI(
@@ -77,7 +143,7 @@ def get_model(model_name: AllModelEnum, /) -> ModelT:
         )
 
     # Testing: Fake model for development
-    if model_name in FakeModelName:
+    if isinstance(model_name, FakeModelName) or model_name == "fake":
         return FakeToolModel(responses=["This is a test response from the fake model."])
 
     raise ValueError(f"Unsupported model: {model_name}")
