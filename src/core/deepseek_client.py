@@ -139,10 +139,13 @@ class DeepSeekChatModel(BaseChatModel):
     ) -> ChatResult:
         """Generate chat completion"""
 
-        # Extract tools if provided
-        tools = kwargs.get('tools')
+        # Extract tools if provided, or use bound tools
+        tools = kwargs.get('tools') or getattr(self, '_bound_tools', None)
         temperature = kwargs.get('temperature', 0.5)
         max_tokens = kwargs.get('max_tokens')
+
+        if tools:
+            logger.info(f"🔧 Using {len(tools)} tools for generation")
 
         response = self.client.chat_completion(
             messages=messages,
@@ -170,8 +173,60 @@ class DeepSeekChatModel(BaseChatModel):
 
     def bind_tools(self, tools):
         """Bind tools to the model for function calling"""
-        # Convert tools to DeepSeek format if needed
-        return self
+        logger.info(f"🔧 Binding {len(tools)} tools to DeepSeek model")
+
+        # Convert LangChain tools to OpenAI/DeepSeek format
+        converted_tools = []
+        for tool in tools:
+            if hasattr(tool, 'name') and hasattr(tool, 'description'):
+                # Extract tool schema
+                tool_schema = {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": getattr(tool, 'args_schema', {})
+                    }
+                }
+
+                # If tool has args_schema, convert it to JSON schema
+                if hasattr(tool, 'args_schema') and tool.args_schema:
+                    try:
+                        # Get the schema from the Pydantic model
+                        if hasattr(tool.args_schema, 'model_json_schema'):
+                            tool_schema["function"]["parameters"] = tool.args_schema.model_json_schema()
+                        elif hasattr(tool.args_schema, 'schema'):
+                            tool_schema["function"]["parameters"] = tool.args_schema.schema()
+                        else:
+                            # Fallback to empty parameters
+                            tool_schema["function"]["parameters"] = {
+                                "type": "object",
+                                "properties": {},
+                                "required": []
+                            }
+                    except Exception as e:
+                        logger.warning(f"⚠️ Could not extract schema for tool {tool.name}: {e}")
+                        tool_schema["function"]["parameters"] = {
+                            "type": "object",
+                            "properties": {},
+                            "required": []
+                        }
+                else:
+                    # Default empty parameters
+                    tool_schema["function"]["parameters"] = {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }
+
+                converted_tools.append(tool_schema)
+                logger.info(f"✅ Converted tool: {tool.name}")
+
+        # Create a new instance with tools bound
+        bound_model = DeepSeekChatModel()
+        bound_model._bound_tools = converted_tools
+        logger.info(f"🔗 Created bound model with {len(converted_tools)} tools")
+        return bound_model
 
     @property
     def _identifying_params(self) -> Dict[str, Any]:

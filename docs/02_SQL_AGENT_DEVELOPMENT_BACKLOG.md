@@ -533,10 +533,17 @@ The SQL Agent backend is complete and fully functional. The remaining work focus
 - [x] Add comprehensive logging to track tool execution flow
 
 **🔧 SOLUTION IMPLEMENTED**:
-- **Root Cause**: FakeListChatModel did not support bind_tools() method
-- **Fix**: Created FakeToolModel class that properly implements tool calling
-- **Enhancement**: Added intelligent tool call generation based on user queries
-- **Result**: SQL Agent now correctly generates and executes tool calls
+- **Root Cause**: DeepSeek model's bind_tools() method was not properly implemented
+- **Real Issue**: Tools were not being converted to DeepSeek API format, causing tools=False in API calls
+- **Fix**: Completely rewrote bind_tools() method in DeepSeekChatModel
+- **Enhancement**: Added proper LangChain to OpenAI/DeepSeek tool schema conversion
+- **Result**: DeepSeek now correctly generates tool_calls and SQL Agent works perfectly
+
+**🧪 VERIFIED WITH REAL DEEPSEEK API**:
+- ✅ DeepSeek API calls now include tools=True
+- ✅ Model generates proper tool_calls with correct format
+- ✅ SQL Agent planning phase works with real DeepSeek model
+- ✅ Complete workflow tested and confirmed working
 
 #### User Story 4.1.2: Verify Database Integration ✅
 **As a** developer
