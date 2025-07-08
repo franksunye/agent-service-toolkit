@@ -68,18 +68,18 @@ def format_sql_result(content: str) -> None:
 
                     # Show query metadata
                     if "query" in result_data:
-                        with st.expander("🔍 Query Details"):
-                            st.code(result_data["query"], language="sql")
+                        st.subheader("🔍 Query Details")
+                        st.code(result_data["query"], language="sql")
 
-                            # Show metadata in columns for better layout
-                            if "row_count" in result_data or "query_type" in result_data:
-                                col1, col2 = st.columns(2)
-                                if "row_count" in result_data:
-                                    with col1:
-                                        st.metric("Rows Returned", result_data["row_count"])
-                                if "query_type" in result_data:
-                                    with col2:
-                                        st.metric("Query Type", result_data["query_type"])
+                        # Show metadata in columns for better layout
+                        if "row_count" in result_data or "query_type" in result_data:
+                            col1, col2 = st.columns(2)
+                            if "row_count" in result_data:
+                                with col1:
+                                    st.metric("Rows Returned", result_data["row_count"])
+                            if "query_type" in result_data:
+                                with col2:
+                                    st.metric("Query Type", result_data["query_type"])
 
                 elif "rows_affected" in result_data:
                     # Display modification results with better formatting
@@ -88,8 +88,8 @@ def format_sql_result(content: str) -> None:
                     st.metric("Rows Affected", rows_affected)
 
                     if "query" in result_data:
-                        with st.expander("🔍 View Executed Query"):
-                            st.code(result_data["query"], language="sql")
+                        st.subheader("🔍 Executed Query")
+                        st.code(result_data["query"], language="sql")
                 else:
                     # Other successful results
                     st.write(content)

@@ -158,15 +158,35 @@ class DeepSeekChatModel(BaseChatModel):
         ai_message = AIMessage(
             content=response.content,
             additional_kwargs={
-                'tool_calls': response.tool_calls,
                 'usage': response.usage,
                 'finish_reason': response.finish_reason
             }
         )
 
-        # Add tool calls if present
+        # Convert and add tool calls if present
         if response.tool_calls:
-            ai_message.tool_calls = response.tool_calls
+            # Convert DeepSeek tool call format to LangChain format
+            langchain_tool_calls = []
+            for tool_call in response.tool_calls:
+                # Parse arguments if they're in string format
+                args = tool_call["function"]["arguments"]
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except json.JSONDecodeError:
+                        logger.warning(f"⚠️ Failed to parse tool call arguments: {args}")
+                        args = {}
+
+                langchain_tool_call = {
+                    "name": tool_call["function"]["name"],
+                    "args": args,
+                    "id": tool_call["id"],
+                    "type": "tool_call"  # LangChain expects "tool_call", not "function"
+                }
+                langchain_tool_calls.append(langchain_tool_call)
+
+            ai_message.tool_calls = langchain_tool_calls
+            logger.info(f"🔧 Converted {len(langchain_tool_calls)} tool calls to LangChain format")
 
         generation = ChatGeneration(message=ai_message)
         return ChatResult(generations=[generation])
