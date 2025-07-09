@@ -206,6 +206,22 @@ Contributions are welcome! Please feel free to submit a Pull Request. Currently 
    pytest
    ```
 
+## 📚 Documentation
+
+### Core Design Documents
+- [System Architecture](docs/01_ARCHITECTURE.md) - Overall system architecture
+- [Backend Design](docs/03_BACKEND_DESIGN.md) - FastAPI service design
+- [Frontend Design](docs/04_FRONTEND_DESIGN.md) - Streamlit interface design
+- [Agent Mechanisms](docs/04_AGENT_MECHANISMS.md) - Agent implementation patterns
+- [LLM Integration](docs/05_LLM_INTEGRATION.md) - Model integration technology
+- [Database & Storage](docs/06_DATABASE_STORAGE.md) - Storage system design
+
+### Detailed Design Documents
+- [SQL Agent Design](docs/08_SQL_AGENT_DESIGN.md) - Complete SQL Agent implementation
+
+### Development Records
+- [SQL Agent Development](docs/02_SQL_AGENT_DEVELOPMENT_BACKLOG.md) - Development process records
+
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.

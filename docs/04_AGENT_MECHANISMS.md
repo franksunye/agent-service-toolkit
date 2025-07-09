@@ -2,22 +2,22 @@
 
 ## 🎯 概述
 
-本文档详细描述Agent Service Toolkit中所有Agent的实现机制，包括LangGraph工作流设计、状态管理、工具集成等核心技术。
+本文档详细描述Agent Service Toolkit中各种Agent的实现机制和设计模式，为Agent开发提供技术指导。
 
 ### 🤖 Agent类型总览
 
-项目支持以下8种不同类型的Agent，每种都有其特定的用途和实现模式：
+项目支持8种不同类型的Agent，每种都有其特定的用途和实现模式：
 
-1. **SQL Agent** - 数据库查询和分析助手，采用4阶段复杂工作流程
-2. **Research Assistant** - 网络搜索和研究助手，集成多种外部工具
-3. **Simple Chatbot** - 基础对话机器人，最简化的实现模式
-4. **Command Agent** - 展示LangGraph v0.3 Command功能的流程控制
-5. **Supervisor Agent** - 多Agent协调管理，智能任务分发
-6. **Interrupt Agent** - 支持人机交互中断的智能对话
-7. **Background Task Agent** - 后台任务处理和实时状态更新
-8. **Knowledge Base Agent** - RAG检索增强生成，集成知识库检索
+1. **SQL Agent** - 数据库查询和分析助手 ([详细设计](08_SQL_AGENT_DESIGN.md))
+2. **Research Assistant** - 网络搜索和研究助手
+3. **Simple Chatbot** - 基础对话机器人
+4. **Command Agent** - LangGraph v0.3 Command功能演示
+5. **Supervisor Agent** - 多Agent协调管理
+6. **Interrupt Agent** - 支持人机交互中断
+7. **Background Task Agent** - 后台任务处理
+8. **Knowledge Base Agent** - RAG检索增强生成
 
-每种Agent都展示了不同的LangGraph设计模式和应用场景。
+> **注意**: SQL Agent的详细实现请参考 [SQL Agent详细设计文档](08_SQL_AGENT_DESIGN.md)
 
 ### 📊 Agent特性对比
 
@@ -80,321 +80,33 @@ agent.add_edge("tools", "model")
 agent.add_edge("block_unsafe_content", END)
 ```
 
-## 🧠 SQL Agent详细设计
+## 🧠 SQL Agent概览
 
-### 四阶段工作流程
+SQL Agent是项目中最复杂的Agent，采用4阶段工作流程处理数据库查询和分析任务。
 
-```mermaid
-graph TD
-    A[用户输入] --> B[Planning Phase]
-    B --> C{需要工具?}
-    C -->|是| D[Tool Execution]
-    C -->|否| E[Reflection Phase]
-    D --> F[Tool Results]
-    F --> E
-    E --> G[最终回复]
-    
-    subgraph "Planning Phase"
-        B1[意图分析]
-        B2[工具选择]
-        B3[参数准备]
-        B4[Function Calling]
-    end
-    
-    subgraph "Tool Execution"
-        D1[工具路由]
-        D2[安全执行]
-        D3[结果收集]
-        D4[错误处理]
-    end
-    
-    subgraph "Reflection Phase"
-        E1[结果分析]
-        E2[回复生成]
-        E3[上下文更新]
-    end
-```
+### 核心特性
+- **4阶段工作流程**: Planning → Tool Execution → Reflection → Memory Storage
+- **记忆系统集成**: 支持用户偏好和查询历史存储
+- **安全SQL执行**: 严格的SQL注入防护和权限控制
+- **智能查询分析**: 自动识别用户查询模式和偏好
 
-#### 1. Planning Phase实现
+### 工具集成
 ```python
-async def planning_phase(state: SQLAgentState, config: RunnableConfig) -> SQLAgentState:
-    """规划阶段 - 分析用户意图并选择工具"""
-    logger.info("🚀 Starting planning phase")
-    messages = state["messages"]
-    last_message = messages[-1] if messages else None
-    
-    if not last_message:
-        return {"messages": [AIMessage(content="No user input received.")]}
-    
-    # 获取数据库上下文
-    schema_info = get_database_schema.invoke({})
-    
-    # 构建规划提示
-    planning_prompt = f"""
-    You are an intelligent SQL database assistant. You MUST use the available tools to answer user questions.
-
-    Available tools:
-    1. get_database_schema - Get database structure information
-    2. generate_sql_query - Generate SQL queries from natural language
-    3. execute_sql_query - Execute SQL queries safely
-    4. analyze_query_results - Analyze query results for insights
-    5. analyze_database_schema - Analyze database design and optimization
-
-    Current database schema:
-    {schema_info}
-
-    User request: {last_message.content}
-
-    You MUST call the appropriate tools. Do not just provide a text response.
-    """
-    
-    # 获取模型并绑定工具
-    model = get_model(config["configurable"].get("model", settings.DEFAULT_MODEL))
-    model_with_tools = model.bind_tools(sql_tools)
-    
-    planning_messages = [
-        SystemMessage(content=planning_prompt),
-        last_message
-    ]
-    
-    response = await model_with_tools.ainvoke(planning_messages, config)
-    
-    # 存储规划结果
-    planning_result = {
-        "planned_tools": response.tool_calls if hasattr(response, 'tool_calls') else [],
-        "reasoning": response.content
-    }
-    
-    return {
-        "messages": [response],
-        "planning_result": planning_result,
-        "database_context": schema_info
-    }
-```
-
-#### 2. Tool Execution实现
-```python
-# SQL Agent工具集
 sql_tools = [
-    get_database_schema,
-    execute_sql_query,
-    analyze_query_results,
-    analyze_database_schema,
-    generate_sql_query,
+    get_database_schema,      # 获取数据库结构
+    execute_sql_query,        # 执行SQL查询
+    analyze_query_results,    # 分析查询结果
+    analyze_database_schema,  # 分析数据库设计
+    generate_sql_query,       # 生成SQL查询
 ]
-
-@tool
-def get_database_schema() -> str:
-    """获取数据库结构信息"""
-    logger.info("🔍 Executing get_database_schema tool")
-    
-    try:
-        db_client = get_database_client()
-        schema_info = db_client.get_schema_info()
-        
-        if 'tables' not in schema_info:
-            return f"Error retrieving schema: {schema_info}"
-        
-        # 格式化schema信息
-        formatted_schema = format_schema_for_display(schema_info)
-        logger.info("📋 Schema formatted successfully")
-        
-        return formatted_schema
-    except Exception as e:
-        logger.error(f"❌ Error in get_database_schema: {e}")
-        return f"Error retrieving database schema: {str(e)}"
-
-@tool
-def execute_sql_query(query: str) -> str:
-    """安全执行SQL查询"""
-    logger.info(f"🔍 Executing SQL query: {query[:100]}...")
-    
-    try:
-        db_client = get_database_client()
-        result = db_client.execute_query(query)
-        
-        # 返回JSON格式的结果，便于前端格式化
-        return json.dumps(result, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.error(f"❌ Error executing SQL query: {e}")
-        return json.dumps({
-            "success": False,
-            "error": str(e),
-            "query": query
-        })
 ```
 
-#### 3. Reflection Phase实现
-```python
-async def reflection_phase(state: SQLAgentState, config: RunnableConfig) -> SQLAgentState:
-    """反思阶段 - 分析结果并生成最终回复"""
-    logger.info("🤔 Starting reflection phase")
-    
-    messages = state["messages"]
-    planning_result = state.get("planning_result", {})
-    
-    # 分析工具执行结果
-    tool_results = []
-    for msg in messages:
-        if hasattr(msg, 'type') and msg.type == 'tool':
-            tool_results.append(msg.content)
-    
-    # 构建反思提示
-    reflection_prompt = f"""
-    Based on the tool execution results, provide a comprehensive and user-friendly response.
-    
-    Planning context: {planning_result.get('reasoning', '')}
-    Tool results: {tool_results}
-    
-    Provide insights, explanations, and actionable information based on the results.
-    """
-    
-    model = get_model(config["configurable"].get("model", settings.DEFAULT_MODEL))
-    
-    reflection_messages = [
-        SystemMessage(content=reflection_prompt),
-        HumanMessage(content="Please analyze the results and provide a comprehensive response.")
-    ]
-    
-    response = await model.ainvoke(reflection_messages, config)
-    
-    return {"messages": [response]}
-```
+### 记忆系统
+- **命名空间**: `("sql_agent", user_id)`
+- **存储内容**: 用户偏好、查询历史、查询模式
+- **个性化**: 基于历史提供个性化建议
 
-### 条件路由逻辑
-```python
-async def should_use_tools(state: SQLAgentState) -> Literal["tools", "reflection"]:
-    """判断是否需要执行工具"""
-    logger.info("🤔 Determining whether to use tools or go to reflection")
-
-    last_message = state["messages"][-1]
-
-    if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
-        logger.info("✅ Going to tools node")
-        return "tools"
-    else:
-        logger.info("⚠️ No tool calls found, going to reflection")
-        return "reflection"
-```
-
-### 记忆系统集成
-
-SQL Agent集成了完整的记忆系统，支持个性化服务：
-
-#### 记忆系统工具函数
-```python
-async def load_user_memory(config: RunnableConfig, store: BaseStore) -> Dict[str, Any]:
-    """从长期记忆加载用户偏好和查询历史"""
-    user_id = config["configurable"].get("user_id", "anonymous")
-    namespace = ("sql_agent", user_id)
-
-    try:
-        preferences = await store.aget(namespace, "preferences")
-        query_history = await store.aget(namespace, "query_history")
-        query_patterns = await store.aget(namespace, "query_patterns")
-
-        return {
-            "preferences": preferences.value if preferences else {},
-            "query_history": query_history.value if query_history else [],
-            "query_patterns": query_patterns.value if query_patterns else []
-        }
-    except Exception as e:
-        logger.error(f"Error loading user memory: {e}")
-        return {"preferences": {}, "query_history": [], "query_patterns": []}
-
-async def save_user_memory(config: RunnableConfig, store: BaseStore, memory_data: Dict[str, Any]):
-    """保存用户偏好和查询历史到长期记忆"""
-    user_id = config["configurable"].get("user_id", "anonymous")
-    namespace = ("sql_agent", user_id)
-
-    try:
-        # 保存偏好设置
-        if "preferences" in memory_data:
-            await store.aput(namespace, "preferences", memory_data["preferences"])
-
-        # 保存查询历史（限制最近50条）
-        if "query_history" in memory_data:
-            query_history = memory_data["query_history"][-50:]
-            await store.aput(namespace, "query_history", query_history)
-
-        # 保存查询模式
-        if "query_patterns" in memory_data:
-            await store.aput(namespace, "query_patterns", memory_data["query_patterns"])
-
-    except Exception as e:
-        logger.error(f"Error saving user memory: {e}")
-
-def analyze_query_patterns(query_history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """分析用户查询模式，识别常见主题和偏好"""
-    patterns = []
-
-    if not query_history:
-        return patterns
-
-    # 分析表使用频率
-    table_usage = {}
-    query_types = {}
-
-    for query_record in query_history:
-        query = query_record.get("query", "").lower()
-
-        # 提取表名
-        import re
-        table_matches = re.findall(r'from\s+(\w+)', query)
-        for table in table_matches:
-            table_usage[table] = table_usage.get(table, 0) + 1
-
-        # 分类查询类型
-        if "select" in query:
-            if "group by" in query or "count" in query:
-                query_types["analytics"] = query_types.get("analytics", 0) + 1
-            else:
-                query_types["lookup"] = query_types.get("lookup", 0) + 1
-
-    # 生成模式
-    if table_usage:
-        most_used_table = max(table_usage, key=table_usage.get)
-        patterns.append({
-            "type": "frequent_table",
-            "table": most_used_table,
-            "usage_count": table_usage[most_used_table],
-            "description": f"Frequently queries {most_used_table} table"
-        })
-
-    if query_types:
-        most_common_type = max(query_types, key=query_types.get)
-        patterns.append({
-            "type": "query_preference",
-            "preference": most_common_type,
-            "count": query_types[most_common_type],
-            "description": f"Prefers {most_common_type} queries"
-        })
-
-    return patterns
-```
-
-#### 个性化上下文构建
-```python
-# 在planning_phase中集成用户记忆
-user_memory = await load_user_memory(config, store)
-
-# 构建个性化上下文
-personalized_context = ""
-if user_memory["query_history"]:
-    recent_queries = user_memory["query_history"][-5:]
-    personalized_context += f"\nRecent user queries: {[q.get('description', '') for q in recent_queries]}"
-
-if user_memory["query_patterns"]:
-    patterns = user_memory["query_patterns"]
-    personalized_context += f"\nUser preferences: {[p.get('description', '') for p in patterns]}"
-```
-
-**记忆系统特点**:
-- **个性化上下文**: 基于历史查询提供个性化建议
-- **查询模式识别**: 自动识别用户的查询偏好和常用表
-- **历史记录管理**: 保存查询历史，支持查询回顾
-- **偏好设置**: 记住用户的响应风格和语言偏好
-- **命名空间隔离**: 使用`("sql_agent", user_id)`确保用户数据隔离
+> **详细实现**: 完整的SQL Agent设计和实现请参考 [SQL Agent详细设计文档](08_SQL_AGENT_DESIGN.md)
 
 ## 🔍 Research Assistant设计
 
