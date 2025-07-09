@@ -5,7 +5,7 @@ from typing import Any
 from langchain.prompts import SystemMessagePromptTemplate
 from langchain_core.language_models.base import LanguageModelInput
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import Runnable, RunnableConfig, RunnableLambda, RunnableSerializable
 from langgraph.graph import END, MessagesState, StateGraph
 from langgraph.store.base import BaseStore
@@ -128,14 +128,44 @@ async def determine_birthdate(
 
     # If birthdate wasn't retrieved from store, proceed with extraction
     m = get_model(config["configurable"].get("model", settings.DEFAULT_MODEL))
-    model_runnable = wrap_model(
-        m.with_structured_output(BirthdateExtraction), birthdate_extraction_prompt.format()
-    ).with_config(tags=["skip_stream"])
-    response: BirthdateExtraction = await model_runnable.ainvoke(state, config)
+
+    # Create a simple extraction prompt instead of using structured output
+    extraction_prompt = f"""
+    {birthdate_extraction_prompt.format()}
+
+    Based on the conversation, extract the user's birthdate.
+
+    Respond in this exact format:
+    BIRTHDATE: [YYYY-MM-DD format or NONE if not found]
+    REASONING: [Your explanation]
+    """
+
+    model_runnable = wrap_model(m, SystemMessage(content=extraction_prompt)).with_config(tags=["skip_stream"])
+    response = await model_runnable.ainvoke(state, config)
+
+    # Parse the response
+    response_text = response.content if hasattr(response, 'content') else str(response)
+
+    # Extract birthdate and reasoning from response
+    birthdate = None
+    reasoning = "Could not parse response"
+
+    try:
+        lines = response_text.split('\n')
+        for line in lines:
+            if line.startswith('BIRTHDATE:'):
+                birthdate_str = line.replace('BIRTHDATE:', '').strip()
+                if birthdate_str.upper() != 'NONE':
+                    birthdate = birthdate_str
+            elif line.startswith('REASONING:'):
+                reasoning = line.replace('REASONING:', '').strip()
+    except Exception as e:
+        logger.error(f"Error parsing birthdate extraction response: {e}")
+        reasoning = f"Error parsing response: {e}"
 
     # If no birthdate found after extraction attempt, interrupt
-    if response.birthdate is None:
-        birthdate_input = interrupt(f"{response.reasoning}\nPlease tell me your birthdate?")
+    if birthdate is None:
+        birthdate_input = interrupt(f"{reasoning}\nPlease tell me your birthdate?")
         # Re-run extraction with the new input
         state["messages"].append(HumanMessage(birthdate_input))
         # Note: Recursive call might need careful handling of depth or state updates
@@ -143,7 +173,7 @@ async def determine_birthdate(
 
     # Birthdate found - convert string to datetime
     try:
-        birthdate = datetime.fromisoformat(response.birthdate)
+        birthdate_dt = datetime.fromisoformat(birthdate)
     except ValueError:
         # If parsing fails, ask for clarification
         birthdate_input = interrupt(
@@ -157,7 +187,7 @@ async def determine_birthdate(
     # Store the newly extracted birthdate only if we have a user_id
     if user_id and namespace:
         # Convert datetime to ISO format string for JSON serialization
-        birthdate_str = birthdate.isoformat() if birthdate else None
+        birthdate_str = birthdate_dt.isoformat() if birthdate_dt else None
         try:
             await store.aput(namespace, key, {"birthdate": birthdate_str})
         except Exception as e:
@@ -165,9 +195,9 @@ async def determine_birthdate(
             logger.error(f"Error writing to store for namespace {namespace}, key {key}: {e}")
 
     # Return the determined birthdate (either from store or extracted)
-    logger.info(f"[determine_birthdate] Returning birthdate {birthdate} for user {user_id}")
+    logger.info(f"[determine_birthdate] Returning birthdate {birthdate_dt} for user {user_id}")
     return {
-        "birthdate": birthdate,
+        "birthdate": birthdate_dt,
         "messages": [],
     }
 

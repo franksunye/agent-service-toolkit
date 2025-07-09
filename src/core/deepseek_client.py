@@ -191,8 +191,13 @@ class DeepSeekChatModel(BaseChatModel):
         generation = ChatGeneration(message=ai_message)
         return ChatResult(generations=[generation])
 
-    def bind_tools(self, tools):
+    def bind_tools(self, tools, **kwargs):
         """Bind tools to the model for function calling"""
+        # Ignore tool_choice parameter as DeepSeek doesn't support it
+        if 'tool_choice' in kwargs:
+            logger.warning("⚠️ DeepSeek model doesn't support tool_choice parameter, ignoring it")
+            kwargs.pop('tool_choice')
+
         logger.info(f"🔧 Binding {len(tools)} tools to DeepSeek model")
 
         # Convert LangChain tools to OpenAI/DeepSeek format
