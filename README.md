@@ -218,6 +218,7 @@ Contributions are welcome! Please feel free to submit a Pull Request. Currently 
 
 ### Detailed Design Documents
 - [SQL Agent Design](docs/08_SQL_AGENT_DESIGN.md) - Complete SQL Agent implementation
+- [Observability & Traceability](docs/09_OBSERVABILITY_TRACEABILITY_DESIGN.md) - AI Native observability design
 
 ### Development Records
 - [SQL Agent Development](docs/02_SQL_AGENT_DEVELOPMENT_BACKLOG.md) - Development process records
