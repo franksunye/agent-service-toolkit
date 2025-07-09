@@ -36,14 +36,13 @@ Agent Service Toolkit 是一个基于现代微服务架构的多Agent智能服�
 ```mermaid
 graph TB
     subgraph "Frontend Layer"
-        ST[Streamlit App<br/>用户界面]
+        ST[Streamlit App<br/>Web界面]
         WEB[Web Browser<br/>用户访问]
     end
 
-    subgraph "API Gateway Layer"
-        API[FastAPI Service<br/>API网关]
+    subgraph "API Service Layer"
+        API[FastAPI Service<br/>API服务]
         AUTH[Authentication<br/>认证授权]
-        RATE[Rate Limiting<br/>限流控制]
     end
 
     subgraph "Agent Layer"
@@ -51,35 +50,40 @@ graph TB
         SQL[SQL Agent<br/>数据库助手]
         CHAT[Chatbot<br/>通用聊天]
         RESEARCH[Research Assistant<br/>研究助手]
-        RAG[RAG Assistant<br/>知识库助手]
-        SUPER[Supervisor Agent<br/>监督代理]
+        COMMAND[Command Agent<br/>命令代理]
+        SUPERVISOR[Supervisor Agent<br/>监督代理]
+        INTERRUPT[Interrupt Agent<br/>中断代理]
+        BG_TASK[Background Task Agent<br/>后台任务代理]
+        KB[Knowledge Base Agent<br/>知识库代理]
     end
 
     subgraph "Core Services"
         LLM[LLM Service<br/>模型服务]
-        TOOLS[Tool Registry<br/>工具注册]
+        TOOLS[Tool System<br/>工具系统]
         MEMORY[Memory Store<br/>记忆存储]
-        DB[Database<br/>数据存储]
+        DB[Database Client<br/>数据库客户端]
     end
 
     subgraph "External Services"
         DEEPSEEK[DeepSeek API<br/>主要模型]
         OPENAI[OpenAI API<br/>备用模型]
-        SEARCH[Web Search<br/>搜索服务]
-        MONITOR[Monitoring<br/>监控服务]
+        SEARCH[DuckDuckGo Search<br/>搜索服务]
+        WEATHER[Weather API<br/>天气服务]
     end
 
     WEB --> ST
     ST --> API
     API --> AUTH
-    API --> RATE
     API --> ROUTER
 
     ROUTER --> SQL
     ROUTER --> CHAT
     ROUTER --> RESEARCH
-    ROUTER --> RAG
-    ROUTER --> SUPER
+    ROUTER --> COMMAND
+    ROUTER --> SUPERVISOR
+    ROUTER --> INTERRUPT
+    ROUTER --> BG_TASK
+    ROUTER --> KB
 
     SQL --> LLM
     SQL --> TOOLS
@@ -88,13 +92,10 @@ graph TB
     CHAT --> LLM
     RESEARCH --> LLM
     RESEARCH --> SEARCH
-    RAG --> LLM
-    RAG --> MEMORY
+    RESEARCH --> WEATHER
 
     LLM --> DEEPSEEK
     LLM --> OPENAI
-
-    API --> MONITOR
 ```
 
 ### 核心组件说明
@@ -110,7 +111,14 @@ graph TB
 
 #### 3. Agent Layer (Agent层)
 - **Agent Router**: 智能路由，根据请求分发到对应Agent
-- **Multiple Agents**: 支持多种专业化Agent并行运行
+- **SQL Agent**: 数据库查询和分析助手
+- **Research Assistant**: 网络搜索和研究助手
+- **Simple Chatbot**: 基础对话机器人
+- **Command Agent**: 命令执行代理
+- **Interrupt Agent**: 支持中断的交互代理
+- **Background Task Agent**: 后台任务处理代理
+- **Knowledge Base Agent**: 知识库检索代理
+- **Supervisor Agent**: 多Agent协调监督代理
 
 #### 4. Core Services (核心服务层)
 - **LLM Service**: 统一的模型调用服务
@@ -118,110 +126,161 @@ graph TB
 - **Memory Store**: 会话记忆和长期存储
 - **Database**: 数据持久化存储
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    用户输入 (prompt.txt)                      │
-│                   文件变化触发机制                            │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│              AgenticDatabaseMonitor                         │
-│                (文件监控器)                                   │
-│  ┌─────────────────────────────────────────────────────────┐ │
-│  │         AgenticPromptHandler                            │ │
-│  │           (事件处理器)                                   │ │
-│  └─────────────────────────────────────────────────────────┘ │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│                AgenticSQLAgent                              │
-│                (核心智能代理)                                 │
-│                                                             │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
-│  │  Planning   │→ │ Tool Select │→ │ Execution   │         │
-│  │    阶段     │  │    阶段     │  │    阶段     │         │
-│  │ LLM分析意图  │  │ 选择工具组合 │  │ 执行工具调用 │         │
-│  └─────────────┘  └─────────────┘  └─────────────┘         │
-│                                           │                 │
-│  ┌─────────────┐                         │                 │
-│  │ Reflection  │←────────────────────────┘                 │
-│  │    阶段     │                                           │
-│  │ 整合结果回复 │                                           │
-│  └─────────────┘                                           │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│                    工具层                                    │
-│                                                             │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
-│  │   SQLTool   │  │DataAnalysis │  │ 未来扩展... │         │
-│  │             │  │    Tool     │  │             │         │
-│  │ 数据库操作   │  │ 智能分析     │  │             │         │
-│  └─────────────┘  └─────────────┘  └─────────────┘         │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│                DatabaseClient                               │
-│                (SQLite 数据库)                               │
-│  ┌─────────────────────────────────────────────────────────┐ │
-│  │ • 连接管理 • 事务支持 • 错误处理 • 模式查询              │ │
-│  └─────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
+## 🔄 实际使用示例
+
+### 典型用户交互流程
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant ST as Streamlit界面
+    participant API as FastAPI服务
+    participant Router as Agent路由器
+    participant Agent as 选定的Agent
+    participant LLM as LLM服务
+    participant Tools as 工具系统
+
+    User->>ST: 输入消息
+    ST->>API: POST /invoke 或 /stream
+    API->>Router: 路由到对应Agent
+    Router->>Agent: 执行Agent逻辑
+
+    Note over Agent: LangGraph工作流程
+    Agent->>LLM: 分析用户意图
+    LLM-->>Agent: 生成工具调用计划
+
+    Agent->>Tools: 执行工具调用
+    Tools-->>Agent: 返回工具结果
+
+    Agent->>LLM: 生成最终回复
+    LLM-->>Agent: 返回用户友好的回复
+
+    Agent-->>Router: 返回响应
+    Router-->>API: 返回结果
+    API-->>ST: 流式或完整响应
+    ST-->>User: 显示结果
 ```
 
-### 技术栈
+### 示例场景：SQL Agent数据库查询
 
-- **编程语言**: Python 3.7+
-- **AI 模型**: DeepSeek Chat API (支持 Function Calling)
-- **数据库**: SQLite 3
-- **文件监控**: Watchdog
-- **HTTP 客户端**: Requests
-- **环境管理**: python-dotenv
+**用户输入**:
+```
+分析一下用户表中各部门的薪资分布情况，并给出优化建议
+```
+
+**系统处理流程**:
+
+1. **用户交互**: 用户在Streamlit界面输入查询
+2. **API调用**: Streamlit调用FastAPI的/sql-agent/invoke端点
+3. **Agent路由**: 系统路由到SQL Agent
+4. **LangGraph工作流程**:
+   - **Planning Phase**: 分析用户意图，选择合适的工具
+   - **Tool Execution**: 执行`get_database_schema`、`execute_sql_query`等工具
+   - **Reflection Phase**: 分析结果并生成智能回复
+5. **结果返回**: 通过API返回到Streamlit界面展示
+
+### 技术栈详解
+
+#### 后端技术栈
+- **FastAPI**: 高性能异步API框架
+- **LangGraph**: 状态图工作流引擎 (v0.3+)
+- **LangChain**: LLM抽象和工具集成
+- **SQLite**: 轻量级数据库存储
+- **Pydantic**: 数据验证和序列化
+
+#### 前端技术栈
+- **Streamlit**: 快速Web应用开发框架
+- **Pandas**: 数据处理和表格显示
+- **JSON**: 数据交换格式
+
+#### LLM集成
+- **DeepSeek API**: 主要推理模型
+- **OpenAI API**: 备用模型支持
+- **Function Calling**: 工具调用机制
 
 ## 📁 项目结构
 
 ```
-PDME-PoC/
+agent-service-toolkit/
 ├── src/                        # 源代码目录
-│   ├── __init__.py             # 包初始化
-│   ├── core/                   # 核心模块
+│   ├── agents/                 # Agent实现
+│   │   ├── __init__.py         # Agent模块导出
+│   │   ├── agents.py           # Agent注册和管理
+│   │   ├── sql_agent.py        # SQL Agent (数据库助手)
+│   │   ├── chatbot.py          # 简单聊天机器人
+│   │   ├── research_assistant.py # 研究助手
+│   │   ├── command_agent.py    # 命令代理
+│   │   ├── interrupt_agent.py  # 中断代理
+│   │   ├── bg_task_agent/      # 后台任务代理
+│   │   ├── knowledge_base_agent.py # 知识库代理
+│   │   ├── langgraph_supervisor_agent.py # 监督代理
+│   │   ├── llama_guard.py      # 安全检查
+│   │   ├── tools.py            # 通用工具
+│   │   └── utils.py            # 工具函数
+│   ├── core/                   # 核心服务
 │   │   ├── __init__.py         # 核心模块导出
-│   │   ├── agentic_agent.py    # AgenticSQLAgent 核心智能代理
-│   │   └── database.py         # DatabaseClient 数据库客户端
-│   ├── tools/                  # 工具模块
-│   │   ├── __init__.py         # 工具模块导出
-│   │   ├── sql_tool.py         # SQLTool SQL执行工具
-│   │   └── analysis_tool.py    # DataAnalysisTool 数据分析工具
-│   └── monitor/                # 监控模块
-│       ├── __init__.py         # 监控模块导出
-│       └── file_monitor.py     # AgenticDatabaseMonitor 文件监控器
-├── tests/                      # 测试目录
-│   ├── __init__.py             # 测试包初始化
-│   └── test_agentic_agent.py   # Agent 功能测试
-├── examples/                   # 示例和演示
-│   └── basic_demo.py           # 基础功能演示脚本
+│   │   ├── settings.py         # 配置管理
+│   │   ├── llm.py              # LLM模型抽象
+│   │   ├── database.py         # 数据库客户端
+│   │   └── deepseek_client.py  # DeepSeek API客户端
+│   ├── service/                # API服务
+│   │   ├── __init__.py         # 服务模块导出
+│   │   ├── service.py          # FastAPI应用
+│   │   └── utils.py            # 服务工具函数
+│   ├── client/                 # 客户端SDK
+│   │   ├── __init__.py         # 客户端模块导出
+│   │   └── client.py           # Agent客户端
+│   ├── memory/                 # 存储系统
+│   │   ├── __init__.py         # 存储模块导出
+│   │   ├── sqlite.py           # SQLite存储实现
+│   │   ├── postgres.py         # PostgreSQL存储实现
+│   │   └── mongodb.py          # MongoDB存储实现
+│   ├── schema/                 # 数据模型
+│   │   ├── __init__.py         # Schema模块导出
+│   │   ├── models.py           # 数据模型定义
+│   │   ├── schema.py           # API Schema
+│   │   └── task_data.py        # 任务数据模型
+│   ├── streamlit_app.py        # Streamlit前端应用
+│   ├── run_service.py          # 服务启动脚本
+│   ├── run_agent.py            # Agent测试脚本
+│   └── run_client.py           # 客户端测试脚本
 ├── docs/                       # 文档目录
-│   └── ARCHITECTURE.md         # 架构文档 (本文档)
-├── data/                       # 数据文件目录
-│   └── database.db             # SQLite 数据库文件
-├── main.py                     # 主入口文件
-├── prompt.txt                  # 用户输入文件 (监控目标)
-├── requirements.txt            # Python 依赖配置
-└── README.md                   # 项目说明文档
+│   ├── 01_ARCHITECTURE.md      # 系统架构文档
+│   ├── 02_SQL_AGENT_DEVELOPMENT_BACKLOG.md # 开发记录
+│   ├── 03_BACKEND_DESIGN.md    # 后端设计文档
+│   ├── 04_FRONTEND_DESIGN.md   # 前端设计文档
+│   ├── 05_AGENT_MECHANISMS.md  # Agent机制文档
+│   ├── 06_LLM_INTEGRATION.md   # LLM集成文档
+│   └── 07_DATABASE_STORAGE.md  # 数据库存储文档
+├── requirements.txt            # Python依赖配置
+├── .env.example               # 环境变量示例
+├── verify_sql_agent.py        # SQL Agent验证脚本
+└── README.md                  # 项目说明文档
 ```
 
 ### 模块职责说明
 
-#### 核心模块 (src/core/)
-- **agentic_agent.py**: 实现 `AgenticSQLAgent` 类，负责四阶段工作流程
-- **database.py**: 实现 `DatabaseClient` 类，提供数据库操作接口
+#### Agent层 (src/agents/)
+- **agents.py**: Agent注册中心，管理所有可用的Agent
+- **sql_agent.py**: SQL数据库助手，支持数据库查询和分析
+- **research_assistant.py**: 研究助手，集成网络搜索和计算器
+- **chatbot.py**: 简单聊天机器人
+- **其他Agent**: 命令代理、中断代理、监督代理等专业化Agent
 
-#### 工具模块 (src/tools/)
-- **sql_tool.py**: 实现 `SQLTool` 类，封装数据库操作功能
-- **analysis_tool.py**: 实现 `DataAnalysisTool` 类，提供智能数据分析
+#### 核心服务层 (src/core/)
+- **settings.py**: 统一配置管理，支持环境变量和默认值
+- **llm.py**: LLM模型抽象层，支持多种模型
+- **database.py**: 数据库客户端，提供安全的SQL执行
+- **deepseek_client.py**: DeepSeek API的自定义实现
 
-#### 监控模块 (src/monitor/)
-- **file_monitor.py**: 实现文件监控和事件处理逻辑
+#### API服务层 (src/service/)
+- **service.py**: FastAPI应用，提供RESTful API和WebSocket支持
+- **utils.py**: 服务层工具函数和中间件
+
+#### 存储层 (src/memory/)
+- **sqlite.py**: SQLite会话存储和长期记忆实现
+- **postgres.py**: PostgreSQL生产环境存储实现
+- **mongodb.py**: MongoDB NoSQL存储实现
 
 ## 🔄 核心工作流程
 
@@ -261,33 +320,76 @@ sequenceDiagram
     ST-->>User: 显示结果
 ```
 
-### LangGraph Agent工作流程
+### Agent工作流程模式
 
-#### 1. Planning Phase (规划阶段)
+项目支持多种Agent工作流程模式，根据Agent类型和复杂度选择合适的实现：
+
+#### 1. 复杂工作流程 (SQL Agent)
+SQL Agent采用4阶段LangGraph工作流程：
+
 ```python
+# Planning Phase (规划阶段)
 async def planning_phase(state: SQLAgentState, config: RunnableConfig) -> SQLAgentState:
 ```
 - **意图分析**: 使用LLM分析用户输入
-- **工具选择**: 根据意图选择合适的工具
-- **参数准备**: 准备工具调用参数
+- **工具选择**: 根据意图选择合适的数据库工具
+- **参数准备**: 准备SQL查询和分析参数
 - **Function Calling**: 生成标准化的工具调用
 
-#### 2. Tool Execution (工具执行阶段)
 ```python
+# Tool Execution (工具执行阶段)
 async def tool_node(state: SQLAgentState) -> SQLAgentState:
 ```
-- **工具路由**: 根据工具名称分发到具体工具
-- **安全执行**: 在受控环境中执行工具
-- **结果收集**: 收集执行结果和元数据
-- **错误处理**: 统一的错误处理和恢复机制
+- **工具路由**: 执行数据库查询、分析等工具
+- **安全执行**: 在受控环境中执行SQL查询
+- **结果收集**: 收集查询结果和元数据
 
-#### 3. Reflection Phase (反思阶段)
 ```python
+# Reflection Phase (反思阶段)
 async def reflection_phase(state: SQLAgentState, config: RunnableConfig) -> SQLAgentState:
 ```
-- **结果分析**: 分析工具执行结果
-- **回复生成**: 基于结果生成用户友好的回复
-- **上下文更新**: 更新会话上下文和状态
+- **结果分析**: 分析SQL查询结果
+- **回复生成**: 生成包含数据洞察的回复
+- **上下文更新**: 更新数据库上下文
+
+#### 2. 简化工作流程 (Simple Chatbot)
+```python
+@entrypoint()
+async def chatbot(inputs: dict, *, previous: dict, config: RunnableConfig):
+    """简单的对话式Agent，直接调用LLM"""
+    messages = inputs["messages"]
+    if previous:
+        messages = previous["messages"] + messages
+
+    model = get_model(config["configurable"].get("model"))
+    response = await model.ainvoke(messages)
+
+    return entrypoint.final(
+        value={"messages": [response]},
+        save={"messages": messages + [response]}
+    )
+```
+
+#### 3. 工具集成工作流程 (Research Assistant)
+```python
+# 使用LangGraph的标准ReAct模式
+class AgentState(MessagesState, total=False):
+    safety: LlamaGuardOutput
+    remaining_steps: RemainingSteps
+
+# 集成多种工具：网络搜索、计算器、天气查询
+tools = [DuckDuckGoSearchResults(), calculator, OpenWeatherMapQueryRun()]
+```
+
+#### 4. 监督工作流程 (Supervisor Agent)
+```python
+# 使用LangGraph的create_supervisor创建多Agent协调
+workflow = create_supervisor(
+    [research_agent, math_agent],
+    model=model,
+    prompt="You are a team supervisor managing multiple expert agents..."
+)
+```
 
 ## 🛠️ 技术栈详解
 
@@ -360,128 +462,82 @@ async def reflection_phase(state: SQLAgentState, config: RunnableConfig) -> SQLA
 
 ## 🚀 部署架构
 
-### 部署模式
+### 本地开发部署
 
-#### 1. 单机部署 (开发/测试)
-```yaml
-# docker-compose.yml
-version: '3.8'
-services:
-  agent-service:
-    build: .
-    ports:
-      - "8080:8080"
-    environment:
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-    volumes:
-      - ./data:/app/data
+#### 1. 环境准备
+```bash
+# 克隆项目
+git clone https://github.com/your-org/agent-service-toolkit.git
+cd agent-service-toolkit
 
-  streamlit-app:
-    build: .
-    command: streamlit run src/streamlit_app.py
-    ports:
-      - "8501:8501"
-    depends_on:
-      - agent-service
+# 安装依赖
+pip install -r requirements.txt
+
+# 配置环境变量
+cp .env.example .env
+# 编辑 .env 文件，添加必要的API密钥
 ```
 
-#### 2. 微服务部署 (生产环境)
-```mermaid
-graph TB
-    subgraph "Load Balancer"
-        LB[Nginx/HAProxy]
-    end
+#### 2. 启动服务
+```bash
+# 启动FastAPI后端服务
+python src/run_service.py
 
-    subgraph "Frontend Cluster"
-        ST1[Streamlit Instance 1]
-        ST2[Streamlit Instance 2]
-        ST3[Streamlit Instance N]
-    end
-
-    subgraph "API Gateway Cluster"
-        API1[FastAPI Instance 1]
-        API2[FastAPI Instance 2]
-        API3[FastAPI Instance N]
-    end
-
-    subgraph "Database Cluster"
-        PG_MASTER[PostgreSQL Master]
-        PG_SLAVE[PostgreSQL Slave]
-        REDIS[Redis Cache]
-    end
-
-    subgraph "Monitoring"
-        PROM[Prometheus]
-        GRAF[Grafana]
-        LOGS[ELK Stack]
-    end
-
-    LB --> ST1
-    LB --> ST2
-    LB --> ST3
-
-    ST1 --> API1
-    ST2 --> API2
-    ST3 --> API3
-
-    API1 --> PG_MASTER
-    API2 --> PG_MASTER
-    API3 --> PG_MASTER
-
-    PG_MASTER --> PG_SLAVE
-    API1 --> REDIS
-    API2 --> REDIS
-    API3 --> REDIS
-
-    API1 --> PROM
-    API2 --> PROM
-    API3 --> PROM
+# 启动Streamlit前端 (新终端)
+streamlit run src/streamlit_app.py
 ```
 
-### 容器化部署
+#### 3. 访问应用
+- **Streamlit界面**: http://localhost:8501
+- **FastAPI文档**: http://localhost:8080/docs
+- **健康检查**: http://localhost:8080/health
 
-#### 1. Dockerfile
-```dockerfile
-FROM python:3.11-slim
+### 生产环境部署
 
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+#### 1. 环境变量配置
+```bash
+# 必需的环境变量
+DEEPSEEK_API_KEY=your_deepseek_api_key
+DEEPSEEK_BASE_URL=https://api.deepseek.com
 
-COPY src/ ./src/
-COPY docs/ ./docs/
+# 可选的环境变量
+OPENAI_API_KEY=your_openai_api_key
+OPENWEATHERMAP_API_KEY=your_weather_api_key
 
-EXPOSE 8080
-CMD ["python", "src/run_service.py"]
+# 服务配置
+HOST=0.0.0.0
+PORT=8080
 ```
 
-#### 2. Kubernetes部署
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: agent-service
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: agent-service
-  template:
-    metadata:
-      labels:
-        app: agent-service
-    spec:
-      containers:
-      - name: agent-service
-        image: agent-service:latest
-        ports:
-        - containerPort: 8080
-        env:
-        - name: DEEPSEEK_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: api-secrets
-              key: deepseek-key
+#### 2. 进程管理
+```bash
+# 使用systemd管理服务
+sudo systemctl start agent-service
+sudo systemctl enable agent-service
+
+# 或使用PM2管理
+pm2 start src/run_service.py --name agent-service
+pm2 start "streamlit run src/streamlit_app.py" --name streamlit-app
+```
+
+#### 3. 反向代理配置 (Nginx)
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    location / {
+        proxy_pass http://localhost:8501;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location /api/ {
+        proxy_pass http://localhost:8080/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
 ```
 
 ## 🔒 安全设计
@@ -842,23 +898,24 @@ class DatabaseClient:
 - 数据库模式查询和分析
 - 错误处理和连接池管理
 
-### AgenticDatabaseMonitor (文件监控器)
+### Agent Router (Agent路由器)
 
 ```python
-class AgenticDatabaseMonitor:
-    def start(self)
-    def stop(self)
+def get_agent(agent_id: str) -> Pregel:
+    """根据ID获取Agent实例"""
+    return agents[agent_id].graph
 
-class AgenticPromptHandler(FileSystemEventHandler):
-    def on_modified(self, event)
-    def _process_agentic_prompt(self)
+def get_all_agent_info() -> list[AgentInfo]:
+    """获取所有Agent信息"""
+    return [AgentInfo(key=agent_id, description=agent.description)
+            for agent_id, agent in agents.items()]
 ```
 
-**监控机制**:
-- 基于 Watchdog 的文件系统监控
-- 实时检测 prompt.txt 文件变化
-- 自动触发 Agent 处理流程
-- 支持热重载和状态恢复
+**路由机制**:
+- 基于Agent ID的动态路由
+- 支持多种Agent类型并行运行
+- 统一的Agent接口和生命周期管理
+- 灵活的Agent注册和发现机制
 
 ## 🧪 测试和质量保证
 
@@ -866,105 +923,90 @@ class AgenticPromptHandler(FileSystemEventHandler):
 
 项目包含完整的测试套件，确保系统的可靠性和稳定性：
 
-#### 单元测试 (tests/test_agentic_agent.py)
-- **基本功能测试**: 验证 Agent 的核心工作流程
-- **工具选择测试**: 验证智能工具选择的准确性
-- **错误处理测试**: 验证异常情况的处理能力
-- **状态管理测试**: 验证对话状态的正确维护
+#### 单元测试
+- **Agent功能测试**: 验证各Agent的核心工作流程
+- **工具执行测试**: 验证工具调用和结果处理
+- **API接口测试**: 验证FastAPI端点的正确性
+- **数据库操作测试**: 验证SQL执行和安全性
 
-#### 集成测试 (examples/basic_demo.py)
+#### 集成测试
 - **端到端测试**: 完整的用户交互流程测试
-- **多场景验证**: 不同使用场景的综合测试
-- **性能基准**: 响应时间和资源使用监控
+- **多Agent协作测试**: 验证Agent间的协调工作
+- **流式响应测试**: 验证实时响应功能
+- **错误恢复测试**: 验证异常情况的处理能力
+
+#### 验证脚本
+- **verify_sql_agent.py**: SQL Agent功能验证
+- **API健康检查**: 服务状态和可用性检查
+- **性能基准测试**: 响应时间和资源使用监控
 
 ### 质量保证措施
 
-1. **代码规范**: 遵循 PEP 8 Python 编码规范
-2. **类型检查**: 完整的类型注解和静态检查
-3. **文档覆盖**: 详细的代码注释和 API 文档
+1. **代码规范**: 遵循PEP 8 Python编码规范
+2. **类型安全**: 完整的Pydantic类型注解和验证
+3. **文档覆盖**: 详细的代码注释和API文档
 4. **错误处理**: 全面的异常处理和错误恢复
-5. **日志记录**: 详细的执行日志和调试信息
-
-## �🔮 扩展方向和路线图
-
-### 短期扩展 (1-3 个月)
-
-#### 1. 工具生态扩展
-- **数据可视化工具**: 集成 matplotlib/plotly 生成图表
-- **导出工具**: 支持 CSV、Excel、JSON 等格式导出
-- **备份恢复工具**: 数据库备份和恢复功能
-
-#### 2. 用户体验优化
-- **Web 界面**: 基于 FastAPI + React 的 Web 界面
-- **实时通知**: WebSocket 实时状态推送
-- **历史管理**: 查询历史和结果缓存
-
-### 中期扩展 (3-6 个月)
-
-#### 3. 多数据库支持
-- **MySQL/PostgreSQL**: 扩展到主流关系型数据库
-- **NoSQL 支持**: MongoDB、Redis 等 NoSQL 数据库
-- **云数据库**: AWS RDS、Azure SQL 等云数据库
-
-#### 4. 高级分析功能
-- **机器学习集成**: 集成 scikit-learn 进行数据挖掘
-- **统计分析**: 高级统计分析和预测功能
-- **报告生成**: 自动生成分析报告和仪表板
-
-### 长期扩展 (6+ 个月)
-
-#### 5. 企业级功能
-- **权限管理**: 基于角色的访问控制 (RBAC)
-- **多租户支持**: 支持多组织和用户隔离
-- **审计日志**: 完整的操作审计和合规支持
-
-#### 6. 智能化升级
-- **自学习能力**: 基于使用历史优化工具选择
-- **预测分析**: 基于历史数据进行趋势预测
-- **自动优化**: 数据库性能自动优化建议
+5. **日志记录**: 结构化日志和调试信息
+6. **安全检查**: SQL注入防护和输入验证
 
 ## 🎯 项目总结
 
-### 技术创新点
+### 技术优势
 
-1. **Agentic 架构**: 采用四阶段智能工作流程，实现真正的智能决策
-2. **Function Calling**: 严格遵循行业标准，确保工具调用的一致性和可靠性
-3. **动态工具选择**: Agent 根据用户意图自主选择工具，避免硬编码流程
-4. **上下文感知**: 基于对话历史和数据库状态进行智能决策
+1. **现代化架构**: 采用LangGraph + FastAPI + Streamlit的现代技术栈
+2. **多Agent支持**: 支持多种类型的专业化Agent并行运行
+3. **灵活工作流程**: 根据Agent复杂度选择合适的工作流程模式
+4. **标准化接口**: 统一的Agent接口和API设计
+5. **企业级特性**: 完整的认证、监控、日志体系
 
 ### 架构优势
 
-- **高度模块化**: 核心、工具、监控模块完全解耦，易于维护和扩展
-- **标准化接口**: 统一的工具接口和错误处理机制
-- **生产就绪**: 完整的错误处理、事务支持和监控日志
-- **开发友好**: 完善的文档、测试和示例代码
+- **微服务设计**: 前端、后端、Agent逻辑完全解耦
+- **水平扩展**: 支持多实例部署和负载均衡
+- **插件化架构**: 新Agent可通过简单配置快速集成
+- **类型安全**: Pydantic确保数据结构的类型安全
+- **异步优先**: 全异步架构提供最佳性能
 
 ### 适用场景
 
-- **数据分析师**: 快速进行数据查询和分析
-- **开发人员**: 数据库操作和模式设计验证
-- **业务人员**: 通过自然语言进行数据查询
-- **学习研究**: Agentic 架构和 Function Calling 的实践案例
+- **企业AI助手**: 为企业提供多种专业化AI助手服务
+- **数据分析平台**: SQL Agent提供强大的数据库查询和分析能力
+- **研究工具**: Research Assistant支持网络搜索和信息收集
+- **开发框架**: 为AI Agent开发提供标准化框架和最佳实践
 
-### 部署和使用
+### 快速开始
 
 ```bash
-# 1. 环境准备
-git clone <repository-url>
-cd PDME-PoC
+# 1. 克隆项目
+git clone https://github.com/your-org/agent-service-toolkit.git
+cd agent-service-toolkit
+
+# 2. 安装依赖
 pip install -r requirements.txt
 
-# 2. 配置环境变量
-export DEEPSEEK_API_KEY="your_api_key"
-export DEEPSEEK_BASE_URL="https://api.deepseek.com"
+# 3. 配置环境变量
+cp .env.example .env
+# 编辑 .env 文件，添加API密钥
 
-# 3. 启动系统
-python main.py
+# 4. 启动服务
+python src/run_service.py
 
-# 4. 开始使用
-echo "数据库里有什么表？" > prompt.txt
+# 5. 启动前端 (新终端)
+streamlit run src/streamlit_app.py
+
+# 6. 访问应用
+# Streamlit界面: http://localhost:8501
+# API文档: http://localhost:8080/docs
 ```
+
+### 未来发展
+
+1. **多模态支持**: 图像、语音等多模态输入
+2. **边缘计算**: 支持边缘设备部署
+3. **联邦学习**: 分布式模型训练和优化
+4. **自动化运维**: AI驱动的运维和优化
 
 ---
 
-**PDME-PoC** 展示了现代 Agentic 架构在数据库操作领域的强大潜力，为智能数据助手的发展提供了坚实的技术基础和实践参考。
+*本文档持续更新，反映系统架构的最新状态和设计决策。*
+
