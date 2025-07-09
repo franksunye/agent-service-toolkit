@@ -1,36 +1,122 @@
-# 🏗️ PDME-PoC Agentic 架构文档
+# 🏗️ Agent Service Toolkit - 系统架构文档
 
 ## 🎯 项目概述
 
-PDME-PoC (Prompt-Driven Model Evolution PoC) 是一个基于现代 Agentic 架构的智能 SQL 数据库助手。项目采用 **Planning → Tool Selection → Execution → Reflection** 的四阶段工作流程，让 AI Agent 根据用户意图自主选择和组合工具，实现智能的数据库操作和分析。
+Agent Service Toolkit 是一个基于现代微服务架构的多Agent智能服务平台。项目采用 **LangGraph + FastAPI + Streamlit** 的技术栈，提供完整的AI Agent开发、部署和交互解决方案。
 
 ### 核心特性
-- 🧠 **智能工具选择** - Agent 根据用户意图自主选择最合适的工具组合
-- ⚡ **动态执行** - 避免硬编码流程，按需调用工具
-- 🔧 **Function Calling** - 采用行业标准的工具调用接口
-- 📊 **多轮对话** - 支持上下文感知的智能交互
-- 🎯 **精准回复** - 基于工具执行结果生成有价值的回复
+- 🤖 **多Agent支持** - 支持多种类型的AI Agent并行运行
+- 🔧 **LangGraph框架** - 基于最新LangGraph v0.3特性构建
+- ⚡ **高性能服务** - FastAPI提供高性能API服务
+- 🎨 **友好界面** - Streamlit提供直观的Web交互界面
+- 📊 **流式响应** - 支持token级和message级流式响应
+- 🔒 **企业级特性** - 包含认证、监控、日志等企业级功能
 
 ## 🧠 核心设计理念
 
-### 1. 智能工具选择
-- Agent 通过 LLM 分析用户意图，自主决定使用哪些工具
-- 支持单工具执行和多工具组合
-- 动态调整执行策略，避免硬编码的工具调用序列
+### 1. 微服务架构
+- **服务分离**: 前端、后端、Agent逻辑完全解耦
+- **水平扩展**: 支持多实例部署和负载均衡
+- **独立部署**: 各组件可独立更新和维护
 
-### 2. Function Calling 标准
-- 采用 OpenAI Function Calling 标准，确保工具调用的一致性
-- 结构化的工具定义和参数传递
-- 统一的错误处理和结果返回机制
+### 2. Agent抽象化
+- **统一接口**: 所有Agent遵循相同的调用接口
+- **插件化设计**: 新Agent可通过简单配置快速集成
+- **状态管理**: 统一的会话状态和内存管理
 
-### 3. 状态管理与上下文
-- 完整的对话历史记录和工具执行状态跟踪
-- 上下文感知的多轮对话支持
-- 会话状态持久化，支持复杂的交互场景
+### 3. 现代化技术栈
+- **异步优先**: 全异步架构提供最佳性能
+- **类型安全**: Pydantic确保数据结构的类型安全
+- **标准化**: 遵循OpenAPI、WebSocket等行业标准
 
 ## 🔧 系统架构
 
 ### 整体架构图
+
+```mermaid
+graph TB
+    subgraph "Frontend Layer"
+        ST[Streamlit App<br/>用户界面]
+        WEB[Web Browser<br/>用户访问]
+    end
+
+    subgraph "API Gateway Layer"
+        API[FastAPI Service<br/>API网关]
+        AUTH[Authentication<br/>认证授权]
+        RATE[Rate Limiting<br/>限流控制]
+    end
+
+    subgraph "Agent Layer"
+        ROUTER[Agent Router<br/>路由分发]
+        SQL[SQL Agent<br/>数据库助手]
+        CHAT[Chatbot<br/>通用聊天]
+        RESEARCH[Research Assistant<br/>研究助手]
+        RAG[RAG Assistant<br/>知识库助手]
+        SUPER[Supervisor Agent<br/>监督代理]
+    end
+
+    subgraph "Core Services"
+        LLM[LLM Service<br/>模型服务]
+        TOOLS[Tool Registry<br/>工具注册]
+        MEMORY[Memory Store<br/>记忆存储]
+        DB[Database<br/>数据存储]
+    end
+
+    subgraph "External Services"
+        DEEPSEEK[DeepSeek API<br/>主要模型]
+        OPENAI[OpenAI API<br/>备用模型]
+        SEARCH[Web Search<br/>搜索服务]
+        MONITOR[Monitoring<br/>监控服务]
+    end
+
+    WEB --> ST
+    ST --> API
+    API --> AUTH
+    API --> RATE
+    API --> ROUTER
+
+    ROUTER --> SQL
+    ROUTER --> CHAT
+    ROUTER --> RESEARCH
+    ROUTER --> RAG
+    ROUTER --> SUPER
+
+    SQL --> LLM
+    SQL --> TOOLS
+    SQL --> DB
+
+    CHAT --> LLM
+    RESEARCH --> LLM
+    RESEARCH --> SEARCH
+    RAG --> LLM
+    RAG --> MEMORY
+
+    LLM --> DEEPSEEK
+    LLM --> OPENAI
+
+    API --> MONITOR
+```
+
+### 核心组件说明
+
+#### 1. Frontend Layer (前端层)
+- **Streamlit App**: 提供Web界面，支持实时聊天和流式响应
+- **Web Browser**: 用户通过浏览器访问应用
+
+#### 2. API Gateway Layer (API网关层)
+- **FastAPI Service**: 高性能API服务，提供RESTful接口
+- **Authentication**: JWT认证和用户管理
+- **Rate Limiting**: API调用频率限制和流量控制
+
+#### 3. Agent Layer (Agent层)
+- **Agent Router**: 智能路由，根据请求分发到对应Agent
+- **Multiple Agents**: 支持多种专业化Agent并行运行
+
+#### 4. Core Services (核心服务层)
+- **LLM Service**: 统一的模型调用服务
+- **Tool Registry**: 工具注册和管理中心
+- **Memory Store**: 会话记忆和长期存储
+- **Database**: 数据持久化存储
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -139,37 +225,402 @@ PDME-PoC/
 
 ## 🔄 核心工作流程
 
-### 四阶段 Agentic 工作流程
+### Agent执行流程
 
-#### Phase 1: Planning (规划阶段)
-```python
-def _planning_phase(self, user_input: str) -> Dict[str, Any]:
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant ST as Streamlit
+    participant API as FastAPI
+    participant Router as Agent Router
+    participant Agent as SQL Agent
+    participant LLM as LLM Service
+    participant Tools as Tool System
+    participant DB as Database
+
+    User->>ST: 发送消息
+    ST->>API: POST /invoke 或 /stream
+    API->>Router: 路由到对应Agent
+    Router->>Agent: 执行Agent逻辑
+
+    Note over Agent: LangGraph工作流程
+    Agent->>LLM: Planning Phase
+    LLM-->>Agent: 生成工具调用计划
+
+    Agent->>Tools: 执行工具调用
+    Tools->>DB: 数据库操作
+    DB-->>Tools: 返回结果
+    Tools-->>Agent: 工具执行结果
+
+    Agent->>LLM: Reflection Phase
+    LLM-->>Agent: 生成最终回复
+
+    Agent-->>Router: 返回响应
+    Router-->>API: 返回结果
+    API-->>ST: 流式或完整响应
+    ST-->>User: 显示结果
 ```
-1. **意图分析**: 使用 LLM 分析用户输入的真实意图
-2. **工具选择**: 根据意图和当前数据库状态选择合适的工具
-3. **执行规划**: 确定工具调用的顺序和参数
-4. **Function Calling**: 生成符合 OpenAI 标准的工具调用指令
 
-**实现细节**:
-- 构建包含工具描述的系统提示
-- 包含当前数据库状态信息
-- 使用 DeepSeek API 进行智能决策
-- 返回结构化的工具调用计划
+### LangGraph Agent工作流程
 
-#### Phase 2: Tool Execution (工具执行阶段)
+#### 1. Planning Phase (规划阶段)
 ```python
-def _execute_tool(self, tool_call: Dict[str, Any]) -> Dict[str, Any]:
+async def planning_phase(state: SQLAgentState, config: RunnableConfig) -> SQLAgentState:
 ```
-1. **工具路由**: 根据工具名称路由到对应的工具实例
-2. **参数处理**: 解析和验证工具调用参数
-3. **安全执行**: 在受控环境中执行工具操作
-4. **结果收集**: 收集工具执行结果和状态信息
+- **意图分析**: 使用LLM分析用户输入
+- **工具选择**: 根据意图选择合适的工具
+- **参数准备**: 准备工具调用参数
+- **Function Calling**: 生成标准化的工具调用
 
-**支持的工具**:
-- `get_database_schema`: 获取数据库结构
-- `generate_and_execute_sql`: 生成并执行 SQL
-- `analyze_query_results`: 分析查询结果
-- `analyze_database_schema`: 分析数据库设计
+#### 2. Tool Execution (工具执行阶段)
+```python
+async def tool_node(state: SQLAgentState) -> SQLAgentState:
+```
+- **工具路由**: 根据工具名称分发到具体工具
+- **安全执行**: 在受控环境中执行工具
+- **结果收集**: 收集执行结果和元数据
+- **错误处理**: 统一的错误处理和恢复机制
+
+#### 3. Reflection Phase (反思阶段)
+```python
+async def reflection_phase(state: SQLAgentState, config: RunnableConfig) -> SQLAgentState:
+```
+- **结果分析**: 分析工具执行结果
+- **回复生成**: 基于结果生成用户友好的回复
+- **上下文更新**: 更新会话上下文和状态
+
+## 🛠️ 技术栈详解
+
+### 后端技术栈
+
+#### 1. FastAPI Framework
+- **版本**: FastAPI 0.100+
+- **特性**:
+  - 高性能异步API框架
+  - 自动API文档生成 (OpenAPI/Swagger)
+  - 类型提示和数据验证
+  - WebSocket支持
+- **用途**: API网关、路由分发、认证授权
+
+#### 2. LangGraph Framework
+- **版本**: LangGraph 0.3+
+- **特性**:
+  - 状态图工作流引擎
+  - 人机交互中断支持
+  - 长期记忆存储
+  - 流式响应支持
+- **用途**: Agent逻辑编排、工作流管理
+
+#### 3. LangChain Ecosystem
+- **组件**:
+  - `langchain-core`: 核心抽象和接口
+  - `langchain-community`: 社区工具和集成
+  - `langchain-openai`: OpenAI模型集成
+- **用途**: LLM抽象、工具集成、消息处理
+
+### 前端技术栈
+
+#### 1. Streamlit Framework
+- **版本**: Streamlit 1.30+
+- **特性**:
+  - 快速Web应用开发
+  - 实时数据更新
+  - 丰富的UI组件
+  - 会话状态管理
+- **用途**: 用户界面、实时聊天、数据可视化
+
+### 数据存储技术
+
+#### 1. SQLite (主要数据库)
+- **用途**: SQL Agent的示例数据库
+- **特性**: 轻量级、无服务器、事务支持
+
+#### 2. Memory Store (记忆存储)
+- **支持类型**:
+  - SQLite: 开发和测试环境
+  - PostgreSQL: 生产环境
+  - MongoDB: NoSQL场景
+- **用途**: 会话记忆、长期知识存储
+
+### LLM模型集成
+
+#### 1. DeepSeek API (主要模型)
+- **模型**: deepseek-chat
+- **特性**: 高性能、成本效益、中文优化
+- **用途**: 主要的推理和对话模型
+
+#### 2. OpenAI API (备用模型)
+- **模型**: GPT-4o, GPT-4o-mini
+- **特性**: 高质量、稳定性好
+- **用途**: 备用模型、特殊场景
+
+#### 3. Fake Model (测试模型)
+- **用途**: 开发测试、CI/CD环境
+- **特性**: 无API调用、可预测响应
+
+## 🚀 部署架构
+
+### 部署模式
+
+#### 1. 单机部署 (开发/测试)
+```yaml
+# docker-compose.yml
+version: '3.8'
+services:
+  agent-service:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+    volumes:
+      - ./data:/app/data
+
+  streamlit-app:
+    build: .
+    command: streamlit run src/streamlit_app.py
+    ports:
+      - "8501:8501"
+    depends_on:
+      - agent-service
+```
+
+#### 2. 微服务部署 (生产环境)
+```mermaid
+graph TB
+    subgraph "Load Balancer"
+        LB[Nginx/HAProxy]
+    end
+
+    subgraph "Frontend Cluster"
+        ST1[Streamlit Instance 1]
+        ST2[Streamlit Instance 2]
+        ST3[Streamlit Instance N]
+    end
+
+    subgraph "API Gateway Cluster"
+        API1[FastAPI Instance 1]
+        API2[FastAPI Instance 2]
+        API3[FastAPI Instance N]
+    end
+
+    subgraph "Database Cluster"
+        PG_MASTER[PostgreSQL Master]
+        PG_SLAVE[PostgreSQL Slave]
+        REDIS[Redis Cache]
+    end
+
+    subgraph "Monitoring"
+        PROM[Prometheus]
+        GRAF[Grafana]
+        LOGS[ELK Stack]
+    end
+
+    LB --> ST1
+    LB --> ST2
+    LB --> ST3
+
+    ST1 --> API1
+    ST2 --> API2
+    ST3 --> API3
+
+    API1 --> PG_MASTER
+    API2 --> PG_MASTER
+    API3 --> PG_MASTER
+
+    PG_MASTER --> PG_SLAVE
+    API1 --> REDIS
+    API2 --> REDIS
+    API3 --> REDIS
+
+    API1 --> PROM
+    API2 --> PROM
+    API3 --> PROM
+```
+
+### 容器化部署
+
+#### 1. Dockerfile
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+COPY src/ ./src/
+COPY docs/ ./docs/
+
+EXPOSE 8080
+CMD ["python", "src/run_service.py"]
+```
+
+#### 2. Kubernetes部署
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-service
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: agent-service
+  template:
+    metadata:
+      labels:
+        app: agent-service
+    spec:
+      containers:
+      - name: agent-service
+        image: agent-service:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DEEPSEEK_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-secrets
+              key: deepseek-key
+```
+
+## 🔒 安全设计
+
+### 认证与授权
+
+#### 1. API认证
+- **Bearer Token**: JWT令牌认证
+- **API Key**: 服务间调用认证
+- **Rate Limiting**: 防止API滥用
+
+#### 2. 数据安全
+- **SQL注入防护**: 参数化查询、SQL验证
+- **输入验证**: Pydantic数据验证
+- **输出过滤**: 敏感信息过滤
+
+### 隐私保护
+
+#### 1. 数据处理
+- **匿名化**: 用户数据匿名化处理
+- **加密存储**: 敏感数据加密存储
+- **访问控制**: 基于角色的访问控制
+
+#### 2. 日志安全
+- **脱敏日志**: 自动脱敏敏感信息
+- **审计跟踪**: 完整的操作审计日志
+- **合规性**: 符合GDPR、CCPA等法规
+
+## 📊 监控与可观测性
+
+### 应用监控
+
+#### 1. 性能指标
+- **响应时间**: API响应时间监控
+- **吞吐量**: 请求处理能力监控
+- **错误率**: 错误和异常监控
+- **资源使用**: CPU、内存、磁盘使用率
+
+#### 2. 业务指标
+- **Agent使用率**: 各Agent的使用频率
+- **工具调用统计**: 工具使用情况分析
+- **用户行为**: 用户交互模式分析
+- **模型性能**: LLM调用成功率和延迟
+
+### 日志管理
+
+#### 1. 结构化日志
+```python
+logger.info("Agent execution", extra={
+    "agent_type": "sql-agent",
+    "user_id": "user123",
+    "thread_id": "thread456",
+    "execution_time": 1.23,
+    "tools_used": ["get_database_schema", "execute_sql_query"]
+})
+```
+
+#### 2. 日志聚合
+- **ELK Stack**: Elasticsearch + Logstash + Kibana
+- **Fluentd**: 日志收集和转发
+- **Grafana**: 日志可视化和告警
+
+## 🔄 扩展性设计
+
+### 水平扩展
+
+#### 1. 无状态设计
+- **API服务**: 完全无状态，支持任意扩展
+- **会话存储**: 外部化到Redis/数据库
+- **负载均衡**: 支持多实例负载均衡
+
+#### 2. 微服务拆分
+```mermaid
+graph TB
+    subgraph "API Gateway"
+        GATEWAY[API Gateway]
+    end
+
+    subgraph "Core Services"
+        AUTH_SVC[Auth Service]
+        AGENT_SVC[Agent Service]
+        LLM_SVC[LLM Service]
+        TOOL_SVC[Tool Service]
+    end
+
+    subgraph "Data Services"
+        USER_DB[User Database]
+        SESSION_DB[Session Database]
+        TOOL_DB[Tool Database]
+    end
+
+    GATEWAY --> AUTH_SVC
+    GATEWAY --> AGENT_SVC
+    AGENT_SVC --> LLM_SVC
+    AGENT_SVC --> TOOL_SVC
+
+    AUTH_SVC --> USER_DB
+    AGENT_SVC --> SESSION_DB
+    TOOL_SVC --> TOOL_DB
+```
+
+### 垂直扩展
+
+#### 1. 性能优化
+- **连接池**: 数据库连接池优化
+- **缓存策略**: Redis缓存热点数据
+- **异步处理**: 全异步架构提升并发
+
+#### 2. 资源优化
+- **内存管理**: 优化内存使用和垃圾回收
+- **CPU优化**: 多核并行处理
+- **I/O优化**: 异步I/O和批处理
+
+## 🎯 项目总结
+
+### 技术优势
+
+1. **现代化架构**: 采用最新的微服务和异步技术
+2. **高可扩展性**: 支持水平和垂直扩展
+3. **企业级特性**: 完整的监控、安全、日志体系
+4. **开发友好**: 类型安全、自动文档、测试覆盖
+
+### 业务价值
+
+1. **快速开发**: 标准化的Agent开发框架
+2. **灵活部署**: 支持多种部署模式
+3. **高可用性**: 分布式架构保证服务稳定
+4. **成本效益**: 优化的资源使用和模型调用
+
+### 未来发展
+
+1. **多模态支持**: 图像、语音等多模态输入
+2. **边缘计算**: 支持边缘设备部署
+3. **联邦学习**: 分布式模型训练和优化
+4. **自动化运维**: AI驱动的运维和优化
+
+---
+
+*本文档持续更新，反映系统架构的最新状态和设计决策。*
 
 #### Phase 3: Reflection (反思整合阶段)
 ```python
