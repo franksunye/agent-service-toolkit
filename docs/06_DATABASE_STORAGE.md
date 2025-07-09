@@ -2,7 +2,22 @@
 
 ## 🎯 概述
 
-本文档详细描述Agent Service Toolkit中的数据存储架构，包括SQL Agent的数据库集成、会话存储、长期记忆存储等核心组件的设计和实现。
+本文档详细描述Agent Service Toolkit中的完整存储架构，包括：
+
+- **SQL Agent数据库集成** - 业务数据的安全查询和管理
+- **会话存储系统** - Agent对话状态的短期记忆管理
+- **长期记忆存储** - 用户偏好和历史信息的持久化
+- **知识库系统** - RAG检索增强生成的外部知识源
+- **记忆系统设计** - 多层次记忆架构和性能优化
+
+### 🗂️ 存储系统分类
+
+项目包含四种主要的存储系统：
+
+1. **会话存储 (Checkpointer)** - 短期记忆，存储对话状态和Agent执行状态
+2. **长期存储 (Store)** - 长期记忆，存储用户偏好、历史信息等持久化数据
+3. **业务数据库 (Database Client)** - SQL Agent使用的业务数据存储
+4. **知识库系统 (Knowledge Base)** - RAG检索增强生成的外部知识源
 
 ## 🏗️ 存储架构概览
 
@@ -13,31 +28,38 @@ graph TB
     subgraph "应用层"
         AGENT[Agent Logic]
         TOOLS[Tool System]
+        KB_AGENT[Knowledge Base Agent]
     end
-    
+
     subgraph "存储抽象层"
         CHECKPOINTER[Checkpointer<br/>会话存储]
         STORE[Store<br/>长期存储]
         DB_CLIENT[Database Client<br/>业务数据]
+        KB_RETRIEVER[Knowledge Base<br/>检索系统]
     end
-    
+
     subgraph "存储实现层"
         SQLITE_CP[SQLite Checkpointer]
         POSTGRES_CP[PostgreSQL Checkpointer]
-        SQLITE_STORE[SQLite Store]
+        MEMORY_STORE[InMemory Store]
         MONGO_STORE[MongoDB Store]
         BUSINESS_DB[Business Database<br/>SQLite/PostgreSQL]
+        BEDROCK_KB[Amazon Bedrock<br/>Knowledge Base]
+        CHROMA_DB[Chroma Vector DB<br/>本地知识库]
     end
-    
+
     AGENT --> CHECKPOINTER
     AGENT --> STORE
     TOOLS --> DB_CLIENT
-    
+    KB_AGENT --> KB_RETRIEVER
+
     CHECKPOINTER --> SQLITE_CP
     CHECKPOINTER --> POSTGRES_CP
-    STORE --> SQLITE_STORE
+    STORE --> MEMORY_STORE
     STORE --> MONGO_STORE
     DB_CLIENT --> BUSINESS_DB
+    KB_RETRIEVER --> BEDROCK_KB
+    KB_RETRIEVER --> CHROMA_DB
 ```
 
 ## 🗄️ SQL Agent数据库集成
@@ -653,6 +675,439 @@ class Settings(BaseSettings):
         env_file = ".env"
 ```
 
+## 📚 知识库系统设计
+
+### RAG检索增强生成架构
+
+知识库系统是项目的重要组成部分，为Knowledge Base Agent提供外部知识检索能力。
+
+```mermaid
+graph TB
+    subgraph "用户查询"
+        USER_QUERY[用户问题]
+    end
+
+    subgraph "检索阶段"
+        EMBEDDING[查询向量化]
+        SEARCH[向量相似度搜索]
+        RANKING[相关性排序]
+    end
+
+    subgraph "知识库"
+        BEDROCK[Amazon Bedrock KB]
+        CHROMA[Chroma Vector DB]
+        DOCS[文档集合]
+    end
+
+    subgraph "生成阶段"
+        CONTEXT[上下文构建]
+        LLM[大语言模型]
+        RESPONSE[增强回复]
+    end
+
+    USER_QUERY --> EMBEDDING
+    EMBEDDING --> SEARCH
+    SEARCH --> BEDROCK
+    SEARCH --> CHROMA
+    BEDROCK --> RANKING
+    CHROMA --> RANKING
+    RANKING --> CONTEXT
+    CONTEXT --> LLM
+    LLM --> RESPONSE
+
+    DOCS --> BEDROCK
+    DOCS --> CHROMA
+```
+
+### Amazon Bedrock Knowledge Base集成
+
+#### 1. Bedrock KB配置
+```python
+# src/agents/knowledge_base_agent.py
+def get_kb_retriever():
+    """创建Amazon Bedrock Knowledge Base检索器"""
+    kb_id = os.environ.get("AWS_KB_ID", "")
+    if not kb_id:
+        raise ValueError("AWS_KB_ID environment variable must be set")
+
+    retriever = AmazonKnowledgeBasesRetriever(
+        knowledge_base_id=kb_id,
+        retrieval_config={
+            "vectorSearchConfiguration": {
+                "numberOfResults": 3,  # 返回最相关的3个文档
+                "overrideSearchType": "HYBRID",  # 混合搜索
+            }
+        },
+        # AWS认证配置
+        region_name=os.environ.get("AWS_REGION", "us-east-1"),
+    )
+    return retriever
+```
+
+#### 2. 文档检索流程
+```python
+async def retrieve_documents(state: AgentState, config: RunnableConfig) -> AgentState:
+    """从知识库检索相关文档"""
+
+    # 获取用户查询
+    human_messages = [msg for msg in state["messages"] if isinstance(msg, HumanMessage)]
+    if not human_messages:
+        return {"retrieved_documents": [], "messages": []}
+
+    query = human_messages[-1].content
+
+    try:
+        # 初始化检索器
+        retriever = get_kb_retriever()
+
+        # 执行检索
+        retrieved_docs = await retriever.ainvoke(query)
+
+        # 处理检索结果
+        document_summaries = []
+        for i, doc in enumerate(retrieved_docs, 1):
+            summary = {
+                "id": doc.metadata.get("id", f"doc-{i}"),
+                "source": doc.metadata.get("source", "Unknown"),
+                "title": doc.metadata.get("title", f"Document {i}"),
+                "content": doc.page_content,
+                "relevance_score": doc.metadata.get("score", 0),
+                "uri": doc.metadata.get("location", {}).get("s3Location", {}).get("uri", ""),
+            }
+            document_summaries.append(summary)
+
+        logger.info(f"Retrieved {len(document_summaries)} documents for query: {query[:50]}...")
+        return {"retrieved_documents": document_summaries, "messages": []}
+
+    except Exception as e:
+        logger.error(f"Error retrieving documents: {str(e)}")
+        return {
+            "retrieved_documents": [],
+            "messages": [AIMessage(content=f"Sorry, I encountered an error while searching: {str(e)}")],
+        }
+```
+
+#### 3. 上下文增强生成
+```python
+async def prepare_augmented_prompt(state: AgentState, config: RunnableConfig) -> AgentState:
+    """准备增强的提示词"""
+    documents = state.get("retrieved_documents", [])
+
+    if not documents:
+        return {"messages": []}
+
+    # 格式化检索到的文档
+    formatted_docs = "\n\n".join([
+        f"--- Document {i + 1} ---\n"
+        f"Source: {doc.get('source', 'Unknown')}\n"
+        f"Title: {doc.get('title', 'Unknown')}\n"
+        f"Relevance Score: {doc.get('relevance_score', 0):.2f}\n\n"
+        f"{doc.get('content', '')}"
+        for i, doc in enumerate(documents)
+    ])
+
+    return {"kb_documents": formatted_docs, "messages": []}
+
+def get_system_prompt(state: AgentState) -> list[BaseMessage]:
+    """构建系统提示词"""
+    base_prompt = """You are a helpful AI assistant with access to a knowledge base.
+    Use the retrieved documents to provide accurate and helpful responses."""
+
+    if "kb_documents" in state:
+        # 包含检索到的文档
+        document_prompt = f"""
+
+I've retrieved the following documents that may be relevant to the query:
+
+{state['kb_documents']}
+
+Please use these documents to inform your response. Only use information from these documents
+and clearly indicate when you are unsure or when information is not available."""
+
+        return [SystemMessage(content=base_prompt + document_prompt)] + state["messages"]
+    else:
+        # 没有检索到文档
+        no_docs_prompt = "\n\nNo relevant documents were found in the knowledge base for this query."
+        return [SystemMessage(content=base_prompt + no_docs_prompt)] + state["messages"]
+```
+
+### Chroma本地知识库实现
+
+#### 1. Chroma数据库设置
+```python
+# src/agents/tools.py (当前被注释，可选实现)
+from langchain_chroma import Chroma
+from langchain_openai import OpenAIEmbeddings
+
+def load_chroma_db():
+    """加载本地Chroma向量数据库"""
+    try:
+        # 初始化嵌入模型
+        embeddings = OpenAIEmbeddings()
+    except Exception as e:
+        raise RuntimeError(
+            "Failed to initialize OpenAIEmbeddings. Ensure the OpenAI API key is set."
+        ) from e
+
+    # 加载持久化的向量数据库
+    chroma_db = Chroma(
+        persist_directory="./chroma_db",
+        embedding_function=embeddings
+    )
+
+    # 创建检索器
+    retriever = chroma_db.as_retriever(
+        search_type="similarity",
+        search_kwargs={"k": 5}  # 返回最相关的5个文档
+    )
+    return retriever
+
+def database_search_func(query: str) -> str:
+    """搜索本地知识库"""
+    # 获取检索器
+    retriever = load_chroma_db()
+
+    # 搜索相关文档
+    documents = retriever.invoke(query)
+
+    # 格式化文档内容
+    context_str = "\n\n".join(doc.page_content for doc in documents)
+    return context_str
+```
+
+#### 2. 文档预处理和入库
+```python
+# scripts/create_chroma_db.py
+import os
+from pathlib import Path
+from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_chroma import Chroma
+from langchain_openai import OpenAIEmbeddings
+
+def create_chroma_database(folder_path: str, db_name: str = "chroma_db"):
+    """创建Chroma向量数据库"""
+
+    # 文档加载器映射
+    loaders = {
+        '.pdf': PyPDFLoader,
+        '.docx': Docx2txtLoader,
+        '.txt': lambda path: TextLoader(path, encoding='utf-8')
+    }
+
+    documents = []
+
+    # 遍历文件夹，加载文档
+    for file_path in Path(folder_path).rglob('*'):
+        if file_path.suffix.lower() in loaders:
+            loader_class = loaders[file_path.suffix.lower()]
+            loader = loader_class(str(file_path))
+            docs = loader.load()
+
+            # 添加元数据
+            for doc in docs:
+                doc.metadata.update({
+                    'source': str(file_path),
+                    'filename': file_path.name,
+                    'file_type': file_path.suffix
+                })
+
+            documents.extend(docs)
+
+    # 文档分块
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200,
+        length_function=len,
+    )
+
+    split_documents = text_splitter.split_documents(documents)
+
+    # 创建向量数据库
+    embeddings = OpenAIEmbeddings()
+
+    vectorstore = Chroma.from_documents(
+        documents=split_documents,
+        embedding=embeddings,
+        persist_directory=db_name
+    )
+
+    print(f"Created Chroma database with {len(split_documents)} document chunks")
+    return vectorstore
+```
+
+### 记忆系统详细设计
+
+#### 会话记忆 vs 长期记忆
+
+```mermaid
+graph LR
+    subgraph "会话记忆 (Checkpointer)"
+        CP_SHORT[对话状态]
+        CP_AGENT[Agent执行状态]
+        CP_TOOLS[工具调用历史]
+        CP_CONTEXT[上下文信息]
+    end
+
+    subgraph "长期记忆 (Store)"
+        STORE_USER[用户偏好]
+        STORE_HISTORY[历史交互]
+        STORE_KNOWLEDGE[学习知识]
+        STORE_CONFIG[配置信息]
+    end
+
+    subgraph "生命周期"
+        SESSION[会话期间]
+        PERSISTENT[持久化存储]
+    end
+
+    CP_SHORT --> SESSION
+    CP_AGENT --> SESSION
+    CP_TOOLS --> SESSION
+    CP_CONTEXT --> SESSION
+
+    STORE_USER --> PERSISTENT
+    STORE_HISTORY --> PERSISTENT
+    STORE_KNOWLEDGE --> PERSISTENT
+    STORE_CONFIG --> PERSISTENT
+```
+
+#### 记忆系统使用示例
+
+```python
+# 在Interrupt Agent中使用长期记忆
+async def store_user_preference(state: AgentState, config: RunnableConfig, store: BaseStore):
+    """存储用户偏好到长期记忆"""
+    user_id = config["configurable"].get("user_id")
+    if not user_id:
+        return
+
+    namespace = ("user_preferences", user_id)
+
+    # 存储生日信息
+    if state.get("birthdate"):
+        await store.aput(
+            namespace,
+            "birthdate",
+            {
+                "birthdate": state["birthdate"].isoformat(),
+                "updated_at": datetime.utcnow().isoformat()
+            }
+        )
+
+    # 存储对话偏好
+    preferences = {
+        "language": "zh-CN",
+        "response_style": "friendly",
+        "last_interaction": datetime.utcnow().isoformat()
+    }
+
+    await store.aput(namespace, "preferences", preferences)
+
+async def retrieve_user_context(config: RunnableConfig, store: BaseStore) -> dict:
+    """从长期记忆检索用户上下文"""
+    user_id = config["configurable"].get("user_id")
+    if not user_id:
+        return {}
+
+    namespace = ("user_preferences", user_id)
+
+    # 检索用户信息
+    birthdate_info = await store.aget(namespace, "birthdate")
+    preferences = await store.aget(namespace, "preferences")
+
+    context = {}
+    if birthdate_info:
+        context["birthdate"] = birthdate_info.get("birthdate")
+    if preferences:
+        context["preferences"] = preferences
+
+    return context
+```
+
+### 存储系统性能优化
+
+#### 1. 索引优化
+```sql
+-- 会话存储索引
+CREATE INDEX IF NOT EXISTS idx_checkpoints_thread_id ON checkpoints(thread_id);
+CREATE INDEX IF NOT EXISTS idx_checkpoints_created_at ON checkpoints(created_at);
+
+-- 长期存储索引
+CREATE INDEX IF NOT EXISTS idx_store_namespace ON store(namespace);
+CREATE INDEX IF NOT EXISTS idx_store_updated_at ON store(updated_at);
+
+-- 复合索引
+CREATE INDEX IF NOT EXISTS idx_store_namespace_key ON store(namespace, key);
+```
+
+#### 2. 缓存策略
+```python
+from functools import lru_cache
+import asyncio
+
+class CachedStore:
+    """带缓存的存储包装器"""
+
+    def __init__(self, store: BaseStore, cache_size: int = 1000):
+        self.store = store
+        self.cache = {}
+        self.cache_size = cache_size
+
+    async def aget(self, namespace: tuple[str, ...], key: str):
+        """带缓存的获取"""
+        cache_key = (namespace, key)
+
+        if cache_key in self.cache:
+            return self.cache[cache_key]
+
+        value = await self.store.aget(namespace, key)
+
+        # 缓存管理
+        if len(self.cache) >= self.cache_size:
+            # 移除最旧的条目
+            oldest_key = next(iter(self.cache))
+            del self.cache[oldest_key]
+
+        self.cache[cache_key] = value
+        return value
+
+    async def aput(self, namespace: tuple[str, ...], key: str, value: dict):
+        """更新存储和缓存"""
+        await self.store.aput(namespace, key, value)
+        cache_key = (namespace, key)
+        self.cache[cache_key] = value
+```
+
+#### 3. 数据清理策略
+```python
+async def cleanup_old_checkpoints(saver: BaseCheckpointSaver, days: int = 7):
+    """清理过期的检查点"""
+    cutoff_date = datetime.utcnow() - timedelta(days=days)
+
+    # 实现取决于具体的存储后端
+    if isinstance(saver, AsyncSqliteSaver):
+        async with saver.conn as conn:
+            await conn.execute(
+                "DELETE FROM checkpoints WHERE created_at < ?",
+                (cutoff_date.isoformat(),)
+            )
+            await conn.commit()
+
+async def cleanup_old_store_data(store: BaseStore, namespace: tuple[str, ...], days: int = 30):
+    """清理过期的存储数据"""
+    cutoff_date = datetime.utcnow() - timedelta(days=days)
+
+    # 搜索过期数据
+    all_data = await store.asearch(namespace)
+
+    for ns, key, value in all_data:
+        if isinstance(value, dict) and "updated_at" in value:
+            updated_at = datetime.fromisoformat(value["updated_at"])
+            if updated_at < cutoff_date:
+                await store.adelete(ns, key)
+```
+
 ---
 
-*本文档详细描述了数据库与存储系统的设计和实现，为数据持久化提供技术指导。*
+*本文档详细描述了数据库与存储系统的设计和实现，包括知识库系统和记忆管理，为数据持久化和智能检索提供技术指导。*
