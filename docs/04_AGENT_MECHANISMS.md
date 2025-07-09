@@ -266,9 +266,9 @@ async def reflection_phase(state: SQLAgentState, config: RunnableConfig) -> SQLA
 async def should_use_tools(state: SQLAgentState) -> Literal["tools", "reflection"]:
     """判断是否需要执行工具"""
     logger.info("🤔 Determining whether to use tools or go to reflection")
-    
+
     last_message = state["messages"][-1]
-    
+
     if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
         logger.info("✅ Going to tools node")
         return "tools"
@@ -276,6 +276,125 @@ async def should_use_tools(state: SQLAgentState) -> Literal["tools", "reflection
         logger.info("⚠️ No tool calls found, going to reflection")
         return "reflection"
 ```
+
+### 记忆系统集成
+
+SQL Agent集成了完整的记忆系统，支持个性化服务：
+
+#### 记忆系统工具函数
+```python
+async def load_user_memory(config: RunnableConfig, store: BaseStore) -> Dict[str, Any]:
+    """从长期记忆加载用户偏好和查询历史"""
+    user_id = config["configurable"].get("user_id", "anonymous")
+    namespace = ("sql_agent", user_id)
+
+    try:
+        preferences = await store.aget(namespace, "preferences")
+        query_history = await store.aget(namespace, "query_history")
+        query_patterns = await store.aget(namespace, "query_patterns")
+
+        return {
+            "preferences": preferences.value if preferences else {},
+            "query_history": query_history.value if query_history else [],
+            "query_patterns": query_patterns.value if query_patterns else []
+        }
+    except Exception as e:
+        logger.error(f"Error loading user memory: {e}")
+        return {"preferences": {}, "query_history": [], "query_patterns": []}
+
+async def save_user_memory(config: RunnableConfig, store: BaseStore, memory_data: Dict[str, Any]):
+    """保存用户偏好和查询历史到长期记忆"""
+    user_id = config["configurable"].get("user_id", "anonymous")
+    namespace = ("sql_agent", user_id)
+
+    try:
+        # 保存偏好设置
+        if "preferences" in memory_data:
+            await store.aput(namespace, "preferences", memory_data["preferences"])
+
+        # 保存查询历史（限制最近50条）
+        if "query_history" in memory_data:
+            query_history = memory_data["query_history"][-50:]
+            await store.aput(namespace, "query_history", query_history)
+
+        # 保存查询模式
+        if "query_patterns" in memory_data:
+            await store.aput(namespace, "query_patterns", memory_data["query_patterns"])
+
+    except Exception as e:
+        logger.error(f"Error saving user memory: {e}")
+
+def analyze_query_patterns(query_history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """分析用户查询模式，识别常见主题和偏好"""
+    patterns = []
+
+    if not query_history:
+        return patterns
+
+    # 分析表使用频率
+    table_usage = {}
+    query_types = {}
+
+    for query_record in query_history:
+        query = query_record.get("query", "").lower()
+
+        # 提取表名
+        import re
+        table_matches = re.findall(r'from\s+(\w+)', query)
+        for table in table_matches:
+            table_usage[table] = table_usage.get(table, 0) + 1
+
+        # 分类查询类型
+        if "select" in query:
+            if "group by" in query or "count" in query:
+                query_types["analytics"] = query_types.get("analytics", 0) + 1
+            else:
+                query_types["lookup"] = query_types.get("lookup", 0) + 1
+
+    # 生成模式
+    if table_usage:
+        most_used_table = max(table_usage, key=table_usage.get)
+        patterns.append({
+            "type": "frequent_table",
+            "table": most_used_table,
+            "usage_count": table_usage[most_used_table],
+            "description": f"Frequently queries {most_used_table} table"
+        })
+
+    if query_types:
+        most_common_type = max(query_types, key=query_types.get)
+        patterns.append({
+            "type": "query_preference",
+            "preference": most_common_type,
+            "count": query_types[most_common_type],
+            "description": f"Prefers {most_common_type} queries"
+        })
+
+    return patterns
+```
+
+#### 个性化上下文构建
+```python
+# 在planning_phase中集成用户记忆
+user_memory = await load_user_memory(config, store)
+
+# 构建个性化上下文
+personalized_context = ""
+if user_memory["query_history"]:
+    recent_queries = user_memory["query_history"][-5:]
+    personalized_context += f"\nRecent user queries: {[q.get('description', '') for q in recent_queries]}"
+
+if user_memory["query_patterns"]:
+    patterns = user_memory["query_patterns"]
+    personalized_context += f"\nUser preferences: {[p.get('description', '') for p in patterns]}"
+```
+
+**记忆系统特点**:
+- **个性化上下文**: 基于历史查询提供个性化建议
+- **查询模式识别**: 自动识别用户的查询偏好和常用表
+- **历史记录管理**: 保存查询历史，支持查询回顾
+- **偏好设置**: 记住用户的响应风格和语言偏好
+- **命名空间隔离**: 使用`("sql_agent", user_id)`确保用户数据隔离
 
 ## 🔍 Research Assistant设计
 
@@ -866,6 +985,270 @@ kb_agent = kb_workflow.compile()
    ```
    - 通过交互收集用户需求，然后执行数据查询
 
+## 🛠️ Agent开发最佳实践
+
+### 记忆系统集成标准模式
+
+#### 1. 状态定义标准
+```python
+class AgentState(MessagesState, total=False):
+    """Agent状态定义标准模板"""
+    # 基础字段
+    safety: LlamaGuardOutput          # 安全检查结果
+    remaining_steps: RemainingSteps   # 剩余执行步数
+
+    # Agent特定字段
+    agent_specific_data: Optional[Dict[str, Any]]
+
+    # 记忆系统字段
+    user_preferences: Optional[Dict[str, Any]]
+    historical_context: Optional[str]
+```
+
+#### 2. 记忆系统集成模板
+```python
+async def load_agent_memory(config: RunnableConfig, store: BaseStore, agent_name: str) -> Dict[str, Any]:
+    """标准记忆加载函数"""
+    user_id = config["configurable"].get("user_id", "anonymous")
+    namespace = (agent_name, user_id)
+
+    try:
+        preferences = await store.aget(namespace, "preferences")
+        history = await store.aget(namespace, "history")
+
+        return {
+            "preferences": preferences.value if preferences else {},
+            "history": history.value if history else []
+        }
+    except Exception as e:
+        logger.error(f"Error loading {agent_name} memory: {e}")
+        return {"preferences": {}, "history": []}
+
+async def save_agent_memory(config: RunnableConfig, store: BaseStore, agent_name: str, memory_data: Dict[str, Any]):
+    """标准记忆保存函数"""
+    user_id = config["configurable"].get("user_id", "anonymous")
+    namespace = (agent_name, user_id)
+
+    try:
+        for key, value in memory_data.items():
+            await store.aput(namespace, key, value)
+        logger.info(f"Saved {agent_name} memory for user {user_id}")
+    except Exception as e:
+        logger.error(f"Error saving {agent_name} memory: {e}")
+```
+
+#### 3. 命名空间管理原则
+```python
+# 标准命名空间格式: (agent_name, user_id, [optional_category])
+NAMESPACE_PATTERNS = {
+    "user_preferences": ("agent_name", "user_id", "preferences"),
+    "interaction_history": ("agent_name", "user_id", "history"),
+    "agent_specific_data": ("agent_name", "user_id", "data"),
+    "shared_context": ("shared", "user_id", "context")  # 跨Agent共享
+}
+
+# 示例使用
+sql_agent_namespace = ("sql_agent", user_id)
+shared_namespace = ("shared", user_id)
+```
+
+### Agent状态管理统一原则
+
+#### 1. 状态字段命名规范
+```python
+class StandardAgentState(MessagesState, total=False):
+    # 系统级字段 - 所有Agent通用
+    safety: LlamaGuardOutput
+    remaining_steps: RemainingSteps
+
+    # 功能级字段 - 特定功能Agent使用
+    tool_results: List[Dict[str, Any]]      # 工具执行结果
+    planning_context: Optional[str]         # 规划上下文
+
+    # Agent级字段 - 特定Agent专用
+    sql_context: Optional[str]              # SQL Agent专用
+    search_results: List[Dict[str, Any]]    # Research Agent专用
+
+    # 记忆级字段 - 记忆系统相关
+    user_preferences: Optional[Dict[str, Any]]
+    personalized_context: Optional[str]
+```
+
+#### 2. 状态更新模式
+```python
+async def update_state_safely(state: AgentState, updates: Dict[str, Any]) -> AgentState:
+    """安全的状态更新函数"""
+    try:
+        # 验证更新字段
+        valid_fields = set(AgentState.__annotations__.keys())
+        invalid_fields = set(updates.keys()) - valid_fields
+
+        if invalid_fields:
+            logger.warning(f"Invalid state fields: {invalid_fields}")
+            updates = {k: v for k, v in updates.items() if k in valid_fields}
+
+        return updates
+    except Exception as e:
+        logger.error(f"Error updating state: {e}")
+        return {}
+```
+
+### 工具调用安全实践
+
+#### 1. 工具执行安全包装
+```python
+async def safe_tool_execution(tool: BaseTool, args: Dict[str, Any], context: str = "") -> Dict[str, Any]:
+    """安全的工具执行包装器"""
+    try:
+        # 参数验证
+        if hasattr(tool, 'args_schema') and tool.args_schema:
+            validated_args = tool.args_schema(**args)
+            result = await tool.ainvoke(validated_args.dict())
+        else:
+            result = await tool.ainvoke(args)
+
+        return {
+            "success": True,
+            "result": result,
+            "tool_name": tool.name,
+            "context": context
+        }
+    except ValidationError as e:
+        logger.error(f"Tool {tool.name} validation error: {e}")
+        return {
+            "success": False,
+            "error": f"Parameter validation failed: {e}",
+            "tool_name": tool.name
+        }
+    except Exception as e:
+        logger.error(f"Tool {tool.name} execution error: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "tool_name": tool.name
+        }
+```
+
+#### 2. 工具权限控制
+```python
+def check_tool_permissions(tool_name: str, user_id: str, context: Dict[str, Any]) -> bool:
+    """检查工具使用权限"""
+    # 定义工具权限级别
+    TOOL_PERMISSIONS = {
+        "read_only": ["get_database_schema", "web_search"],
+        "data_access": ["execute_sql_query", "database_search"],
+        "admin_only": ["analyze_database_schema", "system_commands"]
+    }
+
+    # 检查用户权限级别
+    user_level = context.get("user_level", "read_only")
+
+    for level, tools in TOOL_PERMISSIONS.items():
+        if tool_name in tools:
+            return user_level in ["admin_only"] or level == user_level or level == "read_only"
+
+    return False
+```
+
+### 错误处理和日志记录规范
+
+#### 1. 结构化错误处理
+```python
+class AgentError(Exception):
+    """Agent专用异常类"""
+    def __init__(self, message: str, error_type: str, context: Dict[str, Any] = None):
+        self.message = message
+        self.error_type = error_type
+        self.context = context or {}
+        super().__init__(self.message)
+
+async def handle_agent_error(error: Exception, state: AgentState, context: str = "") -> AgentState:
+    """统一的Agent错误处理"""
+    if isinstance(error, AgentError):
+        error_message = f"Agent Error ({error.error_type}): {error.message}"
+        logger.error(f"{context} - {error_message}", extra=error.context)
+    else:
+        error_message = f"Unexpected error: {str(error)}"
+        logger.exception(f"{context} - {error_message}")
+
+    return {
+        "messages": [AIMessage(content=f"I encountered an error: {error_message}. Please try again.")]
+    }
+```
+
+#### 2. 结构化日志记录
+```python
+import structlog
+
+# 配置结构化日志
+logger = structlog.get_logger()
+
+async def log_agent_execution(agent_name: str, user_id: str, action: str, **kwargs):
+    """记录Agent执行日志"""
+    logger.info(
+        "agent_execution",
+        agent_name=agent_name,
+        user_id=user_id,
+        action=action,
+        timestamp=datetime.utcnow().isoformat(),
+        **kwargs
+    )
+
+# 使用示例
+await log_agent_execution(
+    agent_name="sql_agent",
+    user_id=user_id,
+    action="query_execution",
+    query_type="SELECT",
+    execution_time=0.5,
+    success=True
+)
+```
+
+### Agent间数据隔离设计原则
+
+#### 1. 命名空间隔离策略
+```python
+class NamespaceManager:
+    """命名空间管理器"""
+
+    @staticmethod
+    def get_agent_namespace(agent_name: str, user_id: str) -> Tuple[str, ...]:
+        """获取Agent专用命名空间"""
+        return (agent_name, user_id)
+
+    @staticmethod
+    def get_shared_namespace(user_id: str, category: str = "shared") -> Tuple[str, ...]:
+        """获取共享命名空间"""
+        return ("shared", user_id, category)
+
+    @staticmethod
+    def get_global_namespace(category: str) -> Tuple[str, ...]:
+        """获取全局命名空间"""
+        return ("global", category)
+
+# 使用示例
+sql_namespace = NamespaceManager.get_agent_namespace("sql_agent", user_id)
+shared_namespace = NamespaceManager.get_shared_namespace(user_id, "preferences")
+```
+
+#### 2. 数据访问控制
+```python
+async def secure_data_access(store: BaseStore, namespace: Tuple[str, ...], key: str, user_id: str) -> Optional[Any]:
+    """安全的数据访问控制"""
+    # 检查命名空间权限
+    if len(namespace) >= 2 and namespace[1] != user_id and namespace[0] != "global":
+        logger.warning(f"Unauthorized access attempt: {user_id} -> {namespace}")
+        return None
+
+    try:
+        result = await store.aget(namespace, key)
+        return result.value if result else None
+    except Exception as e:
+        logger.error(f"Data access error: {e}")
+        return None
+```
+
 ### 开发新Agent的指导原则
 
 #### 1. 确定Agent复杂度
@@ -904,7 +1287,7 @@ async def safe_node(state: AgentState) -> AgentState:
         # 节点逻辑
         pass
     except Exception as e:
-        return {"messages": [AIMessage(content=f"Error: {e}")]}
+        return await handle_agent_error(e, state, "node_execution")
 ```
 
 ---

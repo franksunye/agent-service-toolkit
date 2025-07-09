@@ -15,6 +15,7 @@ from langchain_core.tools import BaseTool, tool
 from langgraph.graph import END, MessagesState, StateGraph
 from langgraph.managed import RemainingSteps
 from langgraph.prebuilt import ToolNode
+from langgraph.store.base import BaseStore
 
 from agents.llama_guard import LlamaGuard, LlamaGuardOutput, SafetyAssessment
 from core import get_model, settings
@@ -24,19 +25,126 @@ from core.database import get_database_client
 logger = logging.getLogger(__name__)
 
 
+# Memory system utilities
+async def load_user_memory(config: RunnableConfig, store: BaseStore) -> Dict[str, Any]:
+    """Load user preferences and query history from long-term memory"""
+    user_id = config["configurable"].get("user_id", "anonymous")
+    namespace = ("sql_agent", user_id)
+
+    try:
+        # Load user preferences
+        preferences = await store.aget(namespace, "preferences")
+        query_history = await store.aget(namespace, "query_history")
+        query_patterns = await store.aget(namespace, "query_patterns")
+
+        user_memory = {
+            "preferences": preferences.value if preferences else {},
+            "query_history": query_history.value if query_history else [],
+            "query_patterns": query_patterns.value if query_patterns else []
+        }
+
+        logger.info(f"📚 Loaded user memory for {user_id}: {len(user_memory['query_history'])} queries")
+        return user_memory
+
+    except Exception as e:
+        logger.error(f"❌ Error loading user memory: {e}")
+        return {"preferences": {}, "query_history": [], "query_patterns": []}
+
+
+async def save_user_memory(config: RunnableConfig, store: BaseStore, memory_data: Dict[str, Any]):
+    """Save user preferences and query history to long-term memory"""
+    user_id = config["configurable"].get("user_id", "anonymous")
+    namespace = ("sql_agent", user_id)
+
+    try:
+        # Save preferences
+        if "preferences" in memory_data:
+            await store.aput(namespace, "preferences", memory_data["preferences"])
+
+        # Save query history (keep last 50 queries)
+        if "query_history" in memory_data:
+            query_history = memory_data["query_history"][-50:]  # Limit history size
+            await store.aput(namespace, "query_history", query_history)
+
+        # Save query patterns
+        if "query_patterns" in memory_data:
+            await store.aput(namespace, "query_patterns", memory_data["query_patterns"])
+
+        logger.info(f"💾 Saved user memory for {user_id}")
+
+    except Exception as e:
+        logger.error(f"❌ Error saving user memory: {e}")
+
+
+def analyze_query_patterns(query_history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Analyze user query patterns to identify common themes and preferences"""
+    patterns = []
+
+    if not query_history:
+        return patterns
+
+    # Analyze table usage frequency
+    table_usage = {}
+    query_types = {}
+
+    for query_record in query_history:
+        query = query_record.get("query", "").lower()
+
+        # Extract table names (simple pattern matching)
+        import re
+        table_matches = re.findall(r'from\s+(\w+)', query)
+        for table in table_matches:
+            table_usage[table] = table_usage.get(table, 0) + 1
+
+        # Categorize query types
+        if "select" in query:
+            if "group by" in query or "count" in query or "sum" in query:
+                query_types["analytics"] = query_types.get("analytics", 0) + 1
+            else:
+                query_types["lookup"] = query_types.get("lookup", 0) + 1
+        elif "insert" in query or "update" in query or "delete" in query:
+            query_types["modification"] = query_types.get("modification", 0) + 1
+
+    # Generate patterns
+    if table_usage:
+        most_used_table = max(table_usage, key=table_usage.get)
+        patterns.append({
+            "type": "frequent_table",
+            "table": most_used_table,
+            "usage_count": table_usage[most_used_table],
+            "description": f"Frequently queries {most_used_table} table"
+        })
+
+    if query_types:
+        most_common_type = max(query_types, key=query_types.get)
+        patterns.append({
+            "type": "query_preference",
+            "preference": most_common_type,
+            "count": query_types[most_common_type],
+            "description": f"Prefers {most_common_type} queries"
+        })
+
+    return patterns
+
+
 class SQLAgentState(MessagesState, total=False):
     """
     SQL Agent state extending MessagesState with SQL-specific fields
     """
     safety: LlamaGuardOutput
     remaining_steps: RemainingSteps
-    
+
     # SQL Agent specific state
     planning_result: Optional[Dict[str, Any]]
     tool_execution_results: List[Dict[str, Any]]
     database_context: Optional[str]
     sql_query_history: List[str]
     analysis_insights: Optional[str]
+
+    # Memory system integration
+    user_preferences: Optional[Dict[str, Any]]
+    query_patterns: List[Dict[str, Any]]
+    personalized_context: Optional[str]
 
 
 # SQL Tools Implementation
@@ -280,7 +388,7 @@ def wrap_model(model: BaseChatModel) -> RunnableSerializable[SQLAgentState, AIMe
     return preprocessor | model
 
 
-async def planning_phase(state: SQLAgentState, config: RunnableConfig) -> SQLAgentState:
+async def planning_phase(state: SQLAgentState, config: RunnableConfig, store: BaseStore) -> SQLAgentState:
     """
     Phase 1: Planning - Analyze user intent and plan tool usage
     This is the core intelligence of the SQL Agent
@@ -295,12 +403,26 @@ async def planning_phase(state: SQLAgentState, config: RunnableConfig) -> SQLAge
 
     logger.info(f"📝 User request: {last_message.content}")
 
+    # Load user memory for personalized context
+    logger.info("📚 Loading user memory for personalized context")
+    user_memory = await load_user_memory(config, store)
+
     # Get database context
     logger.info("🔍 Getting database schema for context")
     schema_info = get_database_schema.invoke({})
     logger.info(f"📊 Schema info retrieved: {len(schema_info)} characters")
 
-    # Create planning prompt
+    # Build personalized context
+    personalized_context = ""
+    if user_memory["query_history"]:
+        recent_queries = user_memory["query_history"][-5:]  # Last 5 queries
+        personalized_context += f"\nRecent user queries: {[q.get('description', '') for q in recent_queries]}"
+
+    if user_memory["query_patterns"]:
+        patterns = user_memory["query_patterns"]
+        personalized_context += f"\nUser preferences: {[p.get('description', '') for p in patterns]}"
+
+    # Create planning prompt with personalized context
     planning_prompt = f"""
     You are an intelligent SQL database assistant. You MUST use the available tools to answer user questions.
 
@@ -314,12 +436,16 @@ async def planning_phase(state: SQLAgentState, config: RunnableConfig) -> SQLAge
     Current database schema:
     {schema_info}
 
+    {personalized_context}
+
     User request: {last_message.content}
 
     For the user's request "{last_message.content}", you should:
     1. If they're asking about tables/schema: Use get_database_schema
     2. If they need data queried: Use execute_sql_query with appropriate SQL
     3. If they need analysis: Use analyze_query_results or analyze_database_schema
+
+    Consider the user's previous queries and preferences when planning your approach.
 
     You MUST call the appropriate tools. Do not just provide a text response.
     """
@@ -365,7 +491,10 @@ async def planning_phase(state: SQLAgentState, config: RunnableConfig) -> SQLAge
     return {
         "messages": [response],
         "planning_result": planning_result,
-        "database_context": schema_info
+        "database_context": schema_info,
+        "user_preferences": user_memory["preferences"],
+        "query_patterns": user_memory["query_patterns"],
+        "personalized_context": personalized_context
     }
 
 
@@ -396,7 +525,7 @@ async def should_use_tools(state: SQLAgentState) -> Literal["tools", "reflection
         return "reflection"
 
 
-async def reflection_phase(state: SQLAgentState, config: RunnableConfig) -> SQLAgentState:
+async def reflection_phase(state: SQLAgentState, config: RunnableConfig, store: BaseStore) -> SQLAgentState:
     """
     Phase 4: Reflection - Synthesize results and generate final response
     """
@@ -427,8 +556,70 @@ async def reflection_phase(state: SQLAgentState, config: RunnableConfig) -> SQLA
     ]
     
     response = await model.ainvoke(reflection_messages, config)
-    
+
+    # Save query to user memory
+    await save_query_to_memory(state, config, store)
+
     return {"messages": [response]}
+
+
+async def save_query_to_memory(state: SQLAgentState, config: RunnableConfig, store: BaseStore):
+    """Save the current query and results to user memory"""
+    try:
+        # Extract query information from the conversation
+        messages = state["messages"]
+        user_query = None
+        executed_queries = []
+
+        # Find the original user query
+        for msg in messages:
+            if hasattr(msg, 'type') and msg.type == 'human':
+                user_query = msg.content
+                break
+
+        # Extract executed SQL queries from tool results
+        tool_results = state.get("tool_execution_results", [])
+        for result in tool_results:
+            if "query" in str(result):
+                executed_queries.append(result)
+
+        if user_query:
+            # Load existing memory
+            user_memory = await load_user_memory(config, store)
+
+            # Create query record
+            query_record = {
+                "timestamp": datetime.now().isoformat(),
+                "user_query": user_query,
+                "description": user_query[:100],  # Short description
+                "executed_queries": executed_queries,
+                "success": len(executed_queries) > 0
+            }
+
+            # Add to query history
+            query_history = user_memory["query_history"]
+            query_history.append(query_record)
+
+            # Analyze and update patterns
+            query_patterns = analyze_query_patterns(query_history)
+
+            # Update preferences based on usage
+            preferences = user_memory["preferences"]
+            preferences["last_interaction"] = datetime.now().isoformat()
+            preferences["total_queries"] = len(query_history)
+
+            # Save updated memory
+            memory_data = {
+                "preferences": preferences,
+                "query_history": query_history,
+                "query_patterns": query_patterns
+            }
+
+            await save_user_memory(config, store, memory_data)
+            logger.info(f"💾 Saved query to user memory: {user_query[:50]}...")
+
+    except Exception as e:
+        logger.error(f"❌ Error saving query to memory: {e}")
 
 
 # Build the SQL Agent graph
