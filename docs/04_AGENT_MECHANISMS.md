@@ -2,7 +2,35 @@
 
 ## 🎯 概述
 
-本文档详细描述Agent Service Toolkit中各种Agent的实现机制，包括LangGraph工作流设计、状态管理、工具集成等核心技术。
+本文档详细描述Agent Service Toolkit中所有Agent的实现机制，包括LangGraph工作流设计、状态管理、工具集成等核心技术。
+
+### 🤖 Agent类型总览
+
+项目支持以下8种不同类型的Agent，每种都有其特定的用途和实现模式：
+
+1. **SQL Agent** - 数据库查询和分析助手，采用4阶段复杂工作流程
+2. **Research Assistant** - 网络搜索和研究助手，集成多种外部工具
+3. **Simple Chatbot** - 基础对话机器人，最简化的实现模式
+4. **Command Agent** - 展示LangGraph v0.3 Command功能的流程控制
+5. **Supervisor Agent** - 多Agent协调管理，智能任务分发
+6. **Interrupt Agent** - 支持人机交互中断的智能对话
+7. **Background Task Agent** - 后台任务处理和实时状态更新
+8. **Knowledge Base Agent** - RAG检索增强生成，集成知识库检索
+
+每种Agent都展示了不同的LangGraph设计模式和应用场景。
+
+### 📊 Agent特性对比
+
+| Agent类型 | 复杂度 | 工具集成 | 状态管理 | 特殊功能 | 主要用途 |
+|-----------|--------|----------|----------|----------|----------|
+| SQL Agent | 高 | ✅ 数据库工具 | 复杂状态 | 4阶段工作流 | 数据库查询分析 |
+| Research Assistant | 中 | ✅ 搜索/计算器 | 标准状态 | 安全检查 | 网络搜索研究 |
+| Simple Chatbot | 低 | ❌ 无工具 | 消息历史 | 最简实现 | 基础对话 |
+| Command Agent | 中 | ❌ 无工具 | 基础状态 | Command路由 | 流程控制演示 |
+| Supervisor Agent | 高 | ✅ 多Agent | 协调状态 | 多Agent管理 | 任务分发协调 |
+| Interrupt Agent | 中 | ❌ 无工具 | 扩展状态 | 人机中断 | 交互式对话 |
+| Background Task Agent | 中 | ❌ 无工具 | 任务状态 | 后台处理 | 异步任务管理 |
+| Knowledge Base Agent | 高 | ✅ 检索工具 | 文档状态 | RAG检索 | 知识库问答 |
 
 ## 🏗️ LangGraph框架基础
 
@@ -336,9 +364,107 @@ async def chatbot(
     )
 ```
 
+## 💬 Simple Chatbot设计
+
+### 最简化实现
+Simple Chatbot是最基础的Agent，使用LangGraph的entrypoint装饰器实现简单的对话功能。
+
+```python
+from langchain_core.messages import BaseMessage
+from langchain_core.runnables import RunnableConfig
+from langgraph.func import entrypoint
+from core import get_model, settings
+
+@entrypoint()
+async def chatbot(
+    inputs: dict[str, list[BaseMessage]],
+    *,
+    previous: dict[str, list[BaseMessage]],
+    config: RunnableConfig,
+):
+    """简单聊天机器人 - 直接调用LLM进行对话"""
+    messages = inputs["messages"]
+    if previous:
+        messages = previous["messages"] + messages
+
+    model = get_model(config["configurable"].get("model", settings.DEFAULT_MODEL))
+    response = await model.ainvoke(messages)
+
+    return entrypoint.final(
+        value={"messages": [response]},
+        save={"messages": messages + [response]}
+    )
+```
+
+**特点**:
+- 无状态管理，只保留消息历史
+- 直接LLM调用，无工具集成
+- 适用于基础对话场景
+
+## 🔧 Command Agent设计
+
+### 流程控制演示
+Command Agent展示了LangGraph v0.3的Command功能，用于动态流程控制。
+
+```python
+import random
+from typing import Literal
+from langchain_core.messages import AIMessage
+from langgraph.graph import START, MessagesState, StateGraph
+from langgraph.types import Command
+
+class AgentState(MessagesState, total=False):
+    pass
+
+def node_a(state: AgentState) -> Command[Literal["node_b", "node_c"]]:
+    """节点A - 随机选择下一个节点"""
+    print("Called A")
+    value = random.choice(["a", "b"])
+
+    # Command允许同时更新状态和路由到下一个节点
+    if value == "a":
+        goto = "node_b"
+    else:
+        goto = "node_c"
+
+    return Command(
+        # 状态更新
+        update={"messages": [AIMessage(content=f"Hello {value}")]},
+        # 路由到下一个节点
+        goto=goto,
+    )
+
+def node_b(state: AgentState):
+    """节点B"""
+    print("Called B")
+    return {"messages": [AIMessage(content="Hello B")]}
+
+def node_c(state: AgentState):
+    """节点C"""
+    print("Called C")
+    return {"messages": [AIMessage(content="Hello C")]}
+
+# 构建图
+builder = StateGraph(AgentState)
+builder.add_edge(START, "node_a")
+builder.add_node(node_a)
+builder.add_node(node_b)
+builder.add_node(node_c)
+# 注意：节点A、B、C之间没有边，通过Command动态路由
+
+command_agent = builder.compile()
+```
+
+**特点**:
+- 展示Command功能的动态路由
+- 替代传统的条件边函数
+- 同时支持状态更新和流程控制
+
 ## 🎭 Supervisor Agent设计
 
 ### 多Agent协调
+Supervisor Agent使用LangGraph的create_supervisor功能，协调多个专业Agent。
+
 ```python
 from langgraph.prebuilt import create_react_agent, create_supervisor
 
@@ -371,6 +497,419 @@ workflow = create_supervisor(
 
 langgraph_supervisor_agent = workflow.compile()
 ```
+
+**特点**:
+- 多Agent协调管理
+- 智能任务分发
+- 专业化Agent组合
+- 统一的监督逻辑
+
+## 🔄 Interrupt Agent设计
+
+### 人机交互中断
+Interrupt Agent展示了LangGraph的interrupt功能，支持人机交互中断。
+
+```python
+import logging
+from datetime import datetime
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langgraph.graph import END, MessagesState, StateGraph
+from langgraph.store.base import BaseStore
+from langgraph.types import interrupt
+from pydantic import BaseModel, Field
+
+class AgentState(MessagesState, total=False):
+    birthdate: datetime | None
+
+class BirthdateExtraction(BaseModel):
+    birthdate: str | None = Field(
+        description="The extracted birthdate in YYYY-MM-DD format"
+    )
+    reasoning: str = Field(
+        description="Explanation of how the birthdate was extracted"
+    )
+
+async def determine_birthdate(
+    state: AgentState, config: RunnableConfig, store: BaseStore
+) -> AgentState:
+    """确定用户生日，支持中断询问"""
+
+    user_id = config["configurable"].get("user_id")
+    namespace = (user_id,) if user_id else None
+
+    # 检查存储中是否已有生日信息
+    if namespace:
+        try:
+            result = await store.aget(namespace, key="birthdate")
+            if result and result.value.get("birthdate"):
+                birthdate_str = result.value["birthdate"]
+                birthdate = datetime.fromisoformat(birthdate_str)
+                return {"birthdate": birthdate, "messages": []}
+        except Exception as e:
+            logger.error(f"Error reading from store: {e}")
+
+    # 尝试从对话中提取生日
+    model = get_model(config["configurable"].get("model", settings.DEFAULT_MODEL))
+    model_runnable = wrap_model(
+        model.with_structured_output(BirthdateExtraction),
+        birthdate_extraction_prompt.format()
+    )
+    response: BirthdateExtraction = await model_runnable.ainvoke(state, config)
+
+    # 如果没有找到生日，中断询问用户
+    if response.birthdate is None:
+        birthdate_input = interrupt(f"{response.reasoning}\nPlease tell me your birthdate?")
+        # 将用户输入添加到消息中，递归处理
+        state["messages"].append(HumanMessage(birthdate_input))
+        return await determine_birthdate(state, config, store)
+
+    # 解析并存储生日
+    try:
+        birthdate = datetime.fromisoformat(response.birthdate)
+
+        # 存储到长期记忆
+        if namespace:
+            await store.aput(namespace, "birthdate", {"birthdate": birthdate.isoformat()})
+
+        return {"birthdate": birthdate, "messages": []}
+    except ValueError:
+        # 日期格式错误，再次中断
+        birthdate_input = interrupt(
+            "I couldn't understand the date format. Please provide your birthdate in YYYY-MM-DD format."
+        )
+        state["messages"].append(HumanMessage(birthdate_input))
+        return await determine_birthdate(state, config, store)
+
+# 构建图
+agent = StateGraph(AgentState)
+agent.add_node("background", background)
+agent.add_node("determine_birthdate", determine_birthdate)
+agent.add_node("generate_response", generate_response)
+
+agent.set_entry_point("background")
+agent.add_edge("background", "determine_birthdate")
+agent.add_edge("determine_birthdate", "generate_response")
+agent.add_edge("generate_response", END)
+
+interrupt_agent = agent.compile()
+```
+
+**特点**:
+- 支持人机交互中断
+- 长期记忆存储用户信息
+- 递归处理用户输入
+- 智能信息提取和验证
+
+## 🔄 Background Task Agent设计
+
+### 后台任务处理
+Background Task Agent展示了如何处理后台任务并实时更新状态。
+
+```python
+import asyncio
+from langchain_core.messages import AIMessage
+from langgraph.graph import END, MessagesState, StateGraph
+from langgraph.types import StreamWriter
+from agents.bg_task_agent.task import Task
+
+class AgentState(MessagesState, total=False):
+    pass
+
+async def bg_task(state: AgentState, writer: StreamWriter) -> AgentState:
+    """执行后台任务并实时更新状态"""
+    task1 = Task("Simple task 1...", writer)
+    task2 = Task("Simple task 2...", writer)
+
+    # 启动任务1
+    task1.start()
+    await asyncio.sleep(2)
+
+    # 启动任务2
+    task2.start()
+    await asyncio.sleep(2)
+
+    # 更新任务1状态
+    task1.write_data(data={"status": "Still running..."})
+    await asyncio.sleep(2)
+
+    # 完成任务2
+    task2.finish(result="error", data={"output": 42})
+    await asyncio.sleep(2)
+
+    # 完成任务1
+    task1.finish(result="success", data={"output": 42})
+
+    return {"messages": []}
+
+# 构建图
+agent = StateGraph(AgentState)
+agent.add_node("model", acall_model)
+agent.add_node("bg_task", bg_task)
+agent.set_entry_point("bg_task")
+
+agent.add_edge("bg_task", "model")
+agent.add_edge("model", END)
+
+bg_task_agent = agent.compile()
+```
+
+**Task类设计**:
+```python
+from typing import Literal
+from uuid import uuid4
+from langgraph.types import StreamWriter
+from schema.task_data import TaskData
+
+class Task:
+    def __init__(self, task_name: str, writer: StreamWriter | None = None) -> None:
+        self.name = task_name
+        self.id = str(uuid4())
+        self.state: Literal["new", "running", "complete"] = "new"
+        self.result: Literal["success", "error"] | None = None
+        self.writer = writer
+
+    def start(self, writer: StreamWriter | None = None, data: dict = {}) -> BaseMessage:
+        """启动任务"""
+        self.state = "new"
+        task_message = self._generate_and_dispatch_message(writer, data)
+        return task_message
+
+    def write_data(self, writer: StreamWriter | None = None, data: dict = {}) -> BaseMessage:
+        """更新任务数据"""
+        if self.state == "complete":
+            raise ValueError("Only incomplete tasks can output data.")
+        self.state = "running"
+        task_message = self._generate_and_dispatch_message(writer, data)
+        return task_message
+
+    def finish(
+        self,
+        result: Literal["success", "error"],
+        writer: StreamWriter | None = None,
+        data: dict = {},
+    ) -> BaseMessage:
+        """完成任务"""
+        self.state = "complete"
+        self.result = result
+        task_message = self._generate_and_dispatch_message(writer, data)
+        return task_message
+```
+
+**特点**:
+- 支持后台任务执行
+- 实时状态更新和通知
+- 任务生命周期管理
+- 流式数据传输
+
+## 📚 Knowledge Base Agent设计
+
+### RAG检索增强生成
+Knowledge Base Agent集成Amazon Bedrock Knowledge Base，提供检索增强生成功能。
+
+```python
+import logging
+from typing import Any
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langgraph.graph import END, MessagesState, StateGraph
+from langchain_aws import BedrockRetrieve
+
+class KnowledgeBaseState(MessagesState, total=False):
+    retrieved_documents: list[dict[str, Any]]
+
+async def retrieve_documents(state: KnowledgeBaseState, config: RunnableConfig) -> KnowledgeBaseState:
+    """从知识库检索相关文档"""
+
+    # 获取最后的人类消息作为查询
+    human_messages = [msg for msg in state["messages"] if isinstance(msg, HumanMessage)]
+    if not human_messages:
+        return {"retrieved_documents": [], "messages": []}
+
+    query = human_messages[-1].content
+
+    try:
+        # 初始化检索器
+        retriever = get_kb_retriever()
+
+        # 检索文档
+        retrieved_docs = await retriever.ainvoke(query)
+
+        # 创建文档摘要
+        document_summaries = []
+        for i, doc in enumerate(retrieved_docs, 1):
+            summary = {
+                "id": doc.metadata.get("id", f"doc-{i}"),
+                "source": doc.metadata.get("source", "Unknown"),
+                "title": doc.metadata.get("title", f"Document {i}"),
+                "content": doc.page_content,
+                "relevance_score": doc.metadata.get("score", 0),
+            }
+            document_summaries.append(summary)
+
+        logger.info(f"Retrieved {len(document_summaries)} documents for query: {query[:50]}...")
+
+        return {"retrieved_documents": document_summaries, "messages": []}
+
+    except Exception as e:
+        logger.error(f"Error during document retrieval: {e}")
+        return {
+            "retrieved_documents": [],
+            "messages": [AIMessage(content=f"Sorry, I encountered an error while searching: {str(e)}")],
+        }
+
+async def generate_response(state: KnowledgeBaseState, config: RunnableConfig) -> KnowledgeBaseState:
+    """基于检索到的文档生成回复"""
+
+    retrieved_docs = state.get("retrieved_documents", [])
+
+    if not retrieved_docs:
+        return {
+            "messages": [
+                AIMessage(content="I couldn't find any relevant information to answer your question.")
+            ]
+        }
+
+    # 构建上下文
+    context_parts = []
+    for doc in retrieved_docs[:5]:  # 限制使用前5个最相关的文档
+        context_parts.append(f"Source: {doc['source']}\nContent: {doc['content']}\n")
+
+    context = "\n---\n".join(context_parts)
+
+    # 获取用户查询
+    human_messages = [msg for msg in state["messages"] if isinstance(msg, HumanMessage)]
+    user_query = human_messages[-1].content if human_messages else ""
+
+    # 构建提示
+    prompt = f"""Based on the following context from the knowledge base, please answer the user's question.
+
+Context:
+{context}
+
+User Question: {user_query}
+
+Please provide a comprehensive answer based on the retrieved information. If the context doesn't contain enough information to fully answer the question, please say so and provide what information is available."""
+
+    # 生成回复
+    model = get_model(config["configurable"].get("model", settings.DEFAULT_MODEL))
+    response = await model.ainvoke([HumanMessage(content=prompt)])
+
+    return {"messages": [response]}
+
+def get_kb_retriever():
+    """获取知识库检索器"""
+    return BedrockRetrieve(
+        knowledge_base_id=settings.BEDROCK_KNOWLEDGE_BASE_ID,
+        region_name=settings.AWS_REGION,
+        retrieval_config={"vectorSearchConfiguration": {"numberOfResults": 10}},
+    )
+
+# 构建图
+kb_workflow = StateGraph(KnowledgeBaseState)
+kb_workflow.add_node("retrieve", retrieve_documents)
+kb_workflow.add_node("generate", generate_response)
+
+kb_workflow.set_entry_point("retrieve")
+kb_workflow.add_edge("retrieve", "generate")
+kb_workflow.add_edge("generate", END)
+
+kb_agent = kb_workflow.compile()
+```
+
+**特点**:
+- 集成Amazon Bedrock Knowledge Base
+- 检索增强生成(RAG)架构
+- 文档相关性评分
+- 上下文感知的回复生成
+- 支持多种文档源
+
+## 🎯 Agent选择指南
+
+### 根据需求选择合适的Agent
+
+#### 数据相关任务
+- **SQL Agent**: 数据库查询、数据分析、报表生成
+- **Knowledge Base Agent**: 文档检索、知识问答、信息查找
+
+#### 研究和搜索任务
+- **Research Assistant**: 网络搜索、实时信息获取、计算任务
+- **Knowledge Base Agent**: 内部知识库查询、文档分析
+
+#### 对话和交互任务
+- **Simple Chatbot**: 基础对话、简单问答
+- **Interrupt Agent**: 需要用户输入的交互式对话
+- **Supervisor Agent**: 复杂任务的多Agent协调
+
+#### 系统和流程任务
+- **Command Agent**: 流程控制演示、条件路由
+- **Background Task Agent**: 长时间运行的后台任务
+- **Supervisor Agent**: 多步骤任务的协调管理
+
+### Agent组合使用
+
+#### 典型组合模式
+
+1. **数据分析工作流**:
+   ```
+   Supervisor Agent → SQL Agent → Research Assistant
+   ```
+   - 监督Agent协调数据查询和外部信息补充
+
+2. **知识问答系统**:
+   ```
+   Knowledge Base Agent → Research Assistant
+   ```
+   - 先查询内部知识库，再搜索外部信息
+
+3. **交互式数据探索**:
+   ```
+   Interrupt Agent → SQL Agent
+   ```
+   - 通过交互收集用户需求，然后执行数据查询
+
+### 开发新Agent的指导原则
+
+#### 1. 确定Agent复杂度
+- **简单Agent**: 使用`@entrypoint()`装饰器
+- **中等复杂度**: 使用标准StateGraph + 工具集成
+- **复杂Agent**: 使用多阶段工作流程 + 自定义状态
+
+#### 2. 选择合适的状态管理
+```python
+# 基础状态 - 只需要消息历史
+class AgentState(MessagesState, total=False):
+    pass
+
+# 扩展状态 - 需要额外信息
+class AgentState(MessagesState, total=False):
+    custom_field: str
+    processing_status: dict
+```
+
+#### 3. 工具集成模式
+```python
+# 简单工具集成
+tools = [tool1, tool2]
+model_with_tools = model.bind_tools(tools)
+
+# 复杂工具集成
+async def tool_node(state: AgentState) -> AgentState:
+    # 自定义工具执行逻辑
+    pass
+```
+
+#### 4. 错误处理和恢复
+```python
+async def safe_node(state: AgentState) -> AgentState:
+    try:
+        # 节点逻辑
+        pass
+    except Exception as e:
+        return {"messages": [AIMessage(content=f"Error: {e}")]}
+```
+
+---
+
+*本文档详细描述了所有Agent的实现机制和设计模式，为Agent开发和选择提供全面指导。*
 
 ## 🔧 工具系统设计
 
