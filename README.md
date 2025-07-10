@@ -221,6 +221,7 @@ Contributions are welcome! Please feel free to submit a Pull Request. Currently 
 - [Observability & Traceability](docs/09_OBSERVABILITY_TRACEABILITY_DESIGN.md) - AI Native observability design
 - [Streamlit Cloud Deployment](docs/10_STREAMLIT_CLOUD_DEPLOYMENT.md) - Production deployment guide
 - [Streamlit Standalone Feasibility](docs/11_STREAMLIT_STANDALONE_FEASIBILITY.md) - Standalone deployment analysis
+- [Human-in-the-Loop Analysis](docs/12_HUMAN_IN_THE_LOOP_ANALYSIS.md) - HITL functionality and demo guide
 
 ### Development Records
 - [SQL Agent Development](docs/02_SQL_AGENT_DEVELOPMENT_BACKLOG.md) - Development process records
