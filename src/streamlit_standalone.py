@@ -14,13 +14,22 @@ Key Features:
 - Complete feature parity with the original app
 """
 
+import streamlit as st
+
+# IMPORTANT: set_page_config must be the first Streamlit command
+st.set_page_config(
+    page_title="Agent Service Toolkit - Standalone",
+    page_icon="🧰",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 import asyncio
 import json
 import os
 import uuid
 from typing import Dict, Any, Optional
 
-import streamlit as st
 from dotenv import load_dotenv
 
 # Core imports - these work directly without FastAPI
@@ -181,12 +190,6 @@ async def stream_agent_response(agent_id: str, user_input: str, model: str, thre
 
 async def main():
     """Main Streamlit application"""
-    st.set_page_config(
-        page_title=APP_TITLE,
-        page_icon=APP_ICON,
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
 
     # Hide Streamlit style elements
     st.html(
