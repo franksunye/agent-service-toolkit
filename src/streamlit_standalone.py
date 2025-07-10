@@ -143,20 +143,20 @@ async def run_agent_async(agent_id: str, user_input: str, model: str, thread_id:
         # Get memory system components
         memory_system = setup_memory_system()
 
-        # Create configuration with memory components
-        config = RunnableConfig(configurable={
-            "thread_id": thread_id,
-            "model": model,
-            "user_id": user_id
-        })
-
         # Add store to config if available and agent needs it
         if memory_system and agent_id == "sql-agent":
             try:
                 # Initialize store for this session
                 async with memory_system["store"] as store:
-                    # Add store to config for SQL agent
-                    config["store"] = store
+                    # Create configuration with memory components including store
+                    config = RunnableConfig(
+                        configurable={
+                            "thread_id": thread_id,
+                            "model": model,
+                            "user_id": user_id
+                        },
+                        store=store  # Add store directly to config
+                    )
 
                     # Create input with proper message format
                     input_data = {"messages": [HumanMessage(content=user_input)]}
@@ -182,6 +182,12 @@ async def run_agent_async(agent_id: str, user_input: str, model: str, thread_id:
                     return None
         else:
             # For other agents or if memory system is not available
+            config = RunnableConfig(configurable={
+                "thread_id": thread_id,
+                "model": model,
+                "user_id": user_id
+            })
+
             input_data = {"messages": [HumanMessage(content=user_input)]}
             result = await agent.ainvoke(input_data, config)
 

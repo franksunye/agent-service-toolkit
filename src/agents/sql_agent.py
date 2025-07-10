@@ -388,7 +388,7 @@ def wrap_model(model: BaseChatModel) -> RunnableSerializable[SQLAgentState, AIMe
     return preprocessor | model
 
 
-async def planning_phase(state: SQLAgentState, config: RunnableConfig, store: BaseStore) -> SQLAgentState:
+async def planning_phase(state: SQLAgentState, config: RunnableConfig) -> SQLAgentState:
     """
     Phase 1: Planning - Analyze user intent and plan tool usage
     This is the core intelligence of the SQL Agent
@@ -403,9 +403,16 @@ async def planning_phase(state: SQLAgentState, config: RunnableConfig, store: Ba
 
     logger.info(f"📝 User request: {last_message.content}")
 
+    # Get store from config if available
+    store = config.get("store")
+
     # Load user memory for personalized context
     logger.info("📚 Loading user memory for personalized context")
-    user_memory = await load_user_memory(config, store)
+    if store:
+        user_memory = await load_user_memory(config, store)
+    else:
+        logger.warning("⚠️ No store available, skipping user memory")
+        user_memory = {"preferences": {}, "query_history": [], "query_patterns": []}
 
     # Get database context
     logger.info("🔍 Getting database schema for context")
@@ -525,7 +532,7 @@ async def should_use_tools(state: SQLAgentState) -> Literal["tools", "reflection
         return "reflection"
 
 
-async def reflection_phase(state: SQLAgentState, config: RunnableConfig, store: BaseStore) -> SQLAgentState:
+async def reflection_phase(state: SQLAgentState, config: RunnableConfig) -> SQLAgentState:
     """
     Phase 4: Reflection - Synthesize results and generate final response
     """
@@ -557,8 +564,14 @@ async def reflection_phase(state: SQLAgentState, config: RunnableConfig, store: 
     
     response = await model.ainvoke(reflection_messages, config)
 
+    # Get store from config if available
+    store = config.get("store")
+
     # Save query to user memory
-    await save_query_to_memory(state, config, store)
+    if store:
+        await save_query_to_memory(state, config, store)
+    else:
+        logger.warning("⚠️ No store available, skipping memory save")
 
     return {"messages": [response]}
 
