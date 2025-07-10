@@ -1,0 +1,35 @@
+# Streamlit Cloud Standalone Requirements
+# Optimized for Streamlit Cloud deployment with minimal dependencies
+
+# Core Streamlit
+streamlit>=1.40.1
+
+# LangGraph and LangChain Core (Essential)
+langgraph>=0.3.5
+langchain-core>=0.3.33
+langgraph-checkpoint-sqlite>=2.0.1
+langsmith>=0.1.145
+
+# Data Processing (Essential)
+pandas>=2.2.3
+numpy>=1.26.4
+
+# Configuration and Environment
+pydantic>=2.10.1
+pydantic-settings>=2.6.1
+python-dotenv>=1.0.1
+
+# HTTP Client
+httpx>=0.27.2
+
+# Text Processing
+tiktoken>=0.8.0
+
+# Search and Tools (Optional but useful)
+duckduckgo-search>=7.3.0
+
+# Weather API (Optional)
+pyowm>=3.3.0
+
+# Additional utilities
+setuptools>=75.6.0

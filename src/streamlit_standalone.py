@@ -70,12 +70,13 @@ def get_agent_instance(agent_id: str):
 def setup_memory_system():
     """Initialize memory system for persistence"""
     try:
-        # Note: In a real implementation, you'd want to properly handle async context managers
-        # For now, we'll use a simplified approach
-        return True
+        # Initialize database and store for memory persistence
+        db = initialize_database()
+        store = initialize_store()
+        return {"database": db, "store": store}
     except Exception as e:
         st.error(f"Failed to setup memory: {e}")
-        return False
+        return None
 
 
 def get_available_models():
@@ -129,27 +130,29 @@ async def run_agent_async(agent_id: str, user_input: str, model: str, thread_id:
         agent = get_agent_instance(agent_id)
         if not agent:
             return None
-            
+
         config = RunnableConfig(configurable={
             "thread_id": thread_id,
             "model": model,
             "user_id": user_id
         })
-        
-        # Add memory system if available
-        if hasattr(agent, 'checkpointer') and agent.checkpointer is None:
-            # In a full implementation, you'd set up the checkpointer here
-            pass
-            
-        result = await agent.ainvoke(
-            {"messages": [HumanMessage(content=user_input)]},
-            config
-        )
-        
-        return result["messages"][-1] if result.get("messages") else None
-        
+
+        # Create input with proper message format
+        input_data = {"messages": [HumanMessage(content=user_input)]}
+
+        result = await agent.ainvoke(input_data, config)
+
+        # Extract the last message from the result
+        if result and "messages" in result and result["messages"]:
+            last_message = result["messages"][-1]
+            return last_message
+        else:
+            return None
+
     except Exception as e:
         st.error(f"Error running agent: {e}")
+        import traceback
+        st.error(f"Traceback: {traceback.format_exc()}")
         return None
 
 
@@ -176,7 +179,7 @@ async def stream_agent_response(agent_id: str, user_input: str, model: str, thre
         yield f"Error: {e}"
 
 
-def main():
+async def main():
     """Main Streamlit application"""
     st.set_page_config(
         page_title=APP_TITLE,
@@ -184,54 +187,95 @@ def main():
         layout="wide",
         initial_sidebar_state="expanded"
     )
-    
+
+    # Hide Streamlit style elements
+    st.html(
+        """
+        <style>
+        [data-testid="stStatusWidget"] {
+                visibility: hidden;
+                height: 0%;
+                position: fixed;
+            }
+        </style>
+        """,
+    )
+    if st.get_option("client.toolbarMode") != "minimal":
+        st.set_option("client.toolbarMode", "minimal")
+        await asyncio.sleep(0.1)
+        st.rerun()
+
     # Sidebar configuration
     with st.sidebar:
         st.header(f"{APP_ICON} {APP_TITLE}")
-        st.markdown("---")
-        
-        # Agent selection
-        agent_info = initialize_agents()
-        if agent_info:
-            agent_options = {info.key: info.description for info in agent_info}
-            selected_agent = st.selectbox(
-                "Select Agent",
-                options=list(agent_options.keys()),
-                index=0 if DEFAULT_AGENT not in agent_options else list(agent_options.keys()).index(DEFAULT_AGENT),
-                format_func=lambda x: f"{x}: {agent_options[x][:50]}..."
-            )
-        else:
-            selected_agent = DEFAULT_AGENT
-            st.error("Failed to load agents")
-        
-        # Model selection
-        available_models = get_available_models()
-        selected_model = st.selectbox(
-            "Select Model",
-            options=available_models,
-            index=0
-        )
-        
-        # Settings
-        st.markdown("---")
-        st.subheader("Settings")
-        use_streaming = st.checkbox("Stream responses", value=True)
-        
-        # New chat button
-        if st.button("🆕 New Chat", use_container_width=True):
+        st.markdown("Full toolkit for running an AI agent service built with LangGraph and Streamlit")
+
+        if st.button(":material/chat: New Chat", use_container_width=True):
             st.session_state.messages = []
             st.session_state.thread_id = str(uuid.uuid4())
             st.rerun()
-        
-        # Debug info
-        with st.expander("Debug Info"):
-            st.write(f"Thread ID: {st.session_state.thread_id[:8]}...")
-            st.write(f"User ID: {st.session_state.user_id[:8]}...")
-            st.write(f"Messages: {len(st.session_state.messages)}")
-    
-    # Main chat interface
-    st.title("💬 Chat Interface")
-    
+
+        with st.popover(":material/settings: Settings", use_container_width=True):
+            # Agent selection
+            agent_info = initialize_agents()
+            if agent_info:
+                agent_options = [info.key for info in agent_info]
+                agent_idx = agent_options.index(DEFAULT_AGENT) if DEFAULT_AGENT in agent_options else 0
+                selected_agent = st.selectbox(
+                    "Agent to use",
+                    options=agent_options,
+                    index=agent_idx,
+                )
+            else:
+                selected_agent = DEFAULT_AGENT
+                st.error("Failed to load agents")
+
+            # Model selection
+            available_models = get_available_models()
+            selected_model = st.selectbox(
+                "LLM to use",
+                options=available_models,
+                index=0
+            )
+
+            use_streaming = st.toggle("Stream results", value=True)
+
+            # Display user ID (for debugging or user information)
+            st.text_input("User ID (read-only)", value=st.session_state.user_id, disabled=True)
+
+    # Welcome message for new chats
+    if not st.session_state.messages:
+        # Show welcome message based on selected agent
+        if selected_agent == "sql-agent":
+            WELCOME = """
+            👋 **Welcome to the SQL Agent!**
+
+            I'm your intelligent database assistant with advanced SQL capabilities. I can help you:
+
+            🔍 **Explore your database:**
+            - "What tables are available?"
+            - "Show me the schema for the users table"
+
+            📊 **Query and analyze data:**
+            - "How many users do we have?"
+            - "Show me the top 5 customers by order value"
+            - "What's the average order amount by month?"
+
+            🧠 **Get intelligent insights:**
+            - "Analyze our sales trends"
+            - "Find patterns in customer behavior"
+            - "Suggest optimizations for our database"
+
+            I use a 4-phase approach: Planning → Tool Selection → Execution → Reflection to ensure accurate and helpful responses.
+
+            **Try asking me about your database!**
+            """
+        else:
+            WELCOME = f"👋 Welcome! I'm the **{selected_agent}** agent. How can I help you today?"
+
+        with st.chat_message("ai"):
+            st.write(WELCOME)
+
     # Display chat messages
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
@@ -239,81 +283,51 @@ def main():
                 format_sql_result(message["content"])
             else:
                 st.write(message["content"])
-    
+
     # Chat input
     if prompt := st.chat_input("Type your message here..."):
         # Add user message
         st.session_state.messages.append({"role": "user", "content": prompt})
-        
+
         # Display user message
         with st.chat_message("user"):
             st.write(prompt)
-        
+
         # Generate assistant response
         with st.chat_message("assistant"):
-            if use_streaming:
-                # Streaming response
-                response_placeholder = st.empty()
-                full_response = ""
-                
-                try:
-                    # Note: asyncio.run in Streamlit can be tricky
-                    # This is a simplified implementation
-                    response = run_agent_sync(
-                        selected_agent, 
-                        prompt, 
-                        selected_model,
-                        st.session_state.thread_id,
-                        st.session_state.user_id
-                    )
-                    
-                    if response:
-                        full_response = response.content
-                        if selected_agent == "sql-agent":
-                            format_sql_result(full_response)
-                        else:
-                            response_placeholder.write(full_response)
+            try:
+                response = run_agent_sync(
+                    selected_agent,
+                    prompt,
+                    selected_model,
+                    st.session_state.thread_id,
+                    st.session_state.user_id
+                )
+
+                if response:
+                    full_response = response.content
+                    if selected_agent == "sql-agent":
+                        format_sql_result(full_response)
                     else:
-                        st.error("Failed to get response from agent")
-                        full_response = "Sorry, I encountered an error processing your request."
-                        
-                except Exception as e:
-                    st.error(f"Error: {e}")
-                    full_response = f"Error: {e}"
-            else:
-                # Non-streaming response
-                try:
-                    response = run_agent_sync(
-                        selected_agent,
-                        prompt,
-                        selected_model,
-                        st.session_state.thread_id,
-                        st.session_state.user_id
-                    )
-                    
-                    if response:
-                        full_response = response.content
-                        if selected_agent == "sql-agent":
-                            format_sql_result(full_response)
-                        else:
-                            st.write(full_response)
-                    else:
-                        st.error("Failed to get response from agent")
-                        full_response = "Sorry, I encountered an error processing your request."
-                        
-                except Exception as e:
-                    st.error(f"Error: {e}")
-                    full_response = f"Error: {e}"
-        
+                        st.write(full_response)
+                else:
+                    st.error("Failed to get response from agent")
+                    full_response = "Sorry, I encountered an error processing your request."
+
+            except Exception as e:
+                st.error(f"Error: {e}")
+                full_response = f"Error: {e}"
+
         # Add assistant message to history
         st.session_state.messages.append({"role": "assistant", "content": full_response})
-    
+        st.rerun()  # Clear stale containers
+
     # Footer
     st.markdown("---")
     st.markdown(
         """
         <div style='text-align: center; color: #666;'>
-            <small>Agent Service Toolkit - Standalone Version | 
+            <small>Agent Service Toolkit - Standalone Version |
             Powered by LangGraph + Streamlit</small>
         </div>
         """,
@@ -327,9 +341,12 @@ if __name__ == "__main__":
         st.error("⚠️ No API keys found! Please set DEEPSEEK_API_KEY or OPENAI_API_KEY in your environment.")
         st.info("Add your API keys to .streamlit/secrets.toml or environment variables.")
         st.stop()
-    
+
     # Initialize memory system
     setup_memory_system()
-    
+
+    # Create data directory if it doesn't exist
+    os.makedirs("data", exist_ok=True)
+
     # Run the app
-    main()
+    asyncio.run(main())
