@@ -140,23 +140,56 @@ async def run_agent_async(agent_id: str, user_input: str, model: str, thread_id:
         if not agent:
             return None
 
+        # Get memory system components
+        memory_system = setup_memory_system()
+
+        # Create configuration with memory components
         config = RunnableConfig(configurable={
             "thread_id": thread_id,
             "model": model,
             "user_id": user_id
         })
 
-        # Create input with proper message format
-        input_data = {"messages": [HumanMessage(content=user_input)]}
+        # Add store to config if available and agent needs it
+        if memory_system and agent_id == "sql-agent":
+            try:
+                # Initialize store for this session
+                async with memory_system["store"] as store:
+                    # Add store to config for SQL agent
+                    config["store"] = store
 
-        result = await agent.ainvoke(input_data, config)
+                    # Create input with proper message format
+                    input_data = {"messages": [HumanMessage(content=user_input)]}
 
-        # Extract the last message from the result
-        if result and "messages" in result and result["messages"]:
-            last_message = result["messages"][-1]
-            return last_message
+                    result = await agent.ainvoke(input_data, config)
+
+                    # Extract the last message from the result
+                    if result and "messages" in result and result["messages"]:
+                        last_message = result["messages"][-1]
+                        return last_message
+                    else:
+                        return None
+            except Exception as store_error:
+                # If store fails, run without memory
+                st.warning(f"Memory system unavailable, running without persistence: {store_error}")
+                input_data = {"messages": [HumanMessage(content=user_input)]}
+                result = await agent.ainvoke(input_data, config)
+
+                if result and "messages" in result and result["messages"]:
+                    last_message = result["messages"][-1]
+                    return last_message
+                else:
+                    return None
         else:
-            return None
+            # For other agents or if memory system is not available
+            input_data = {"messages": [HumanMessage(content=user_input)]}
+            result = await agent.ainvoke(input_data, config)
+
+            if result and "messages" in result and result["messages"]:
+                last_message = result["messages"][-1]
+                return last_message
+            else:
+                return None
 
     except Exception as e:
         st.error(f"Error running agent: {e}")
