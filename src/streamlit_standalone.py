@@ -166,8 +166,22 @@ async def run_agent_async(agent_id: str, user_input: str, model: str, thread_id:
 
 
 def run_agent_sync(agent_id: str, user_input: str, model: str, thread_id: str, user_id: str):
-    """Synchronous wrapper for agent execution"""
-    return asyncio.run(run_agent_async(agent_id, user_input, model, thread_id, user_id))
+    """Synchronous wrapper for agent execution using thread pool"""
+    import concurrent.futures
+    import threading
+
+    def run_in_thread():
+        # Create a new event loop for this thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(run_agent_async(agent_id, user_input, model, thread_id, user_id))
+        finally:
+            loop.close()
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        future = executor.submit(run_in_thread)
+        return future.result(timeout=60)  # 60 second timeout
 
 
 async def stream_agent_response(agent_id: str, user_input: str, model: str, thread_id: str, user_id: str):
@@ -188,7 +202,7 @@ async def stream_agent_response(agent_id: str, user_input: str, model: str, thre
         yield f"Error: {e}"
 
 
-async def main():
+def main():
     """Main Streamlit application"""
 
     # Hide Streamlit style elements
@@ -205,7 +219,6 @@ async def main():
     )
     if st.get_option("client.toolbarMode") != "minimal":
         st.set_option("client.toolbarMode", "minimal")
-        await asyncio.sleep(0.1)
         st.rerun()
 
     # Sidebar configuration
@@ -352,4 +365,4 @@ if __name__ == "__main__":
     os.makedirs("data", exist_ok=True)
 
     # Run the app
-    asyncio.run(main())
+    main()
